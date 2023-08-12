@@ -1,0 +1,80 @@
+package skiplist
+
+import (
+	"unsafe"
+
+	"github.com/ls4154/goldb/util"
+)
+
+type Arena struct {
+	blocks       [][]byte
+	currentBlock []byte
+	allocPos     int
+	bytesLeft    int
+	blockSize    int
+}
+
+func NewArena(blockSize int) *Arena {
+	util.Assert(blockSize > 0)
+	return &Arena{
+		blockSize: blockSize,
+	}
+}
+
+func (a *Arena) Allocate(bytes int) []byte {
+	if a.bytesLeft < bytes {
+		return a.allocateFallBack(bytes)
+	}
+
+	m := a.currentBlock[a.allocPos : a.allocPos+bytes]
+	a.allocPos += bytes
+	a.bytesLeft -= bytes
+	return m
+}
+
+const align = 8
+
+func (a *Arena) AllocateAligned(bytes int) []byte {
+	padSize := 0
+	if mod := a.allocPos % align; align != 0 {
+		padSize = align - mod
+	}
+
+	needBytes := padSize + bytes
+	if a.bytesLeft < needBytes {
+		return a.allocateFallBack(bytes)
+	}
+
+	m := a.currentBlock[a.allocPos : a.allocPos+needBytes]
+	a.allocPos += needBytes
+	a.bytesLeft -= needBytes
+	return m[padSize:]
+}
+
+func (a *Arena) allocateFallBack(bytes int) []byte {
+	if bytes > a.blockSize/4 {
+		return a.allocateNewBlock(bytes)
+	}
+
+	a.currentBlock = a.allocateNewBlock(a.blockSize)
+	a.allocPos = 0
+	a.bytesLeft = a.blockSize
+
+	m := a.currentBlock[a.allocPos : a.allocPos+bytes]
+	a.allocPos += bytes
+	a.bytesLeft -= bytes
+	return m
+}
+
+func (a *Arena) allocateNewBlock(bytes int) []byte {
+	block := make([]byte, bytes)
+
+	util.Assert(uintptr(unsafe.Pointer(&block[0]))%align == 0)
+
+	a.blocks = append(a.blocks, block)
+	return block
+}
+
+func bytesToPtr(m []byte) unsafe.Pointer {
+	return unsafe.Pointer(&m[0])
+}
