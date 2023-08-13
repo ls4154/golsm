@@ -69,6 +69,5 @@ func DefaultOptions() *Options {
 }
 
 func Open(options *Options, path string) (DB, error) {
-	// TODO
-	return nil, nil
+	return open(options, path)
 }
