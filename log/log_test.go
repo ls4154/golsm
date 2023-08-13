@@ -1,0 +1,74 @@
+package log
+
+import (
+	"bytes"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestLog(t *testing.T) {
+	buf := new(bytes.Buffer)
+
+	records := [][]byte{
+		[]byte("abc"),
+		[]byte("xyz"),
+		[]byte("12345678"),
+		[]byte(""),
+	}
+
+	writer := NewLogWriter(buf)
+
+	for _, r := range records {
+		err := writer.AddRecord(r)
+		require.NoError(t, err)
+	}
+
+	reader := NewLogReader(buf)
+
+	for _, r := range records {
+		record, ok := reader.ReadRecord()
+		require.True(t, ok)
+		require.Equal(t, r, record)
+	}
+
+	_, ok := reader.ReadRecord()
+	require.False(t, ok)
+}
+
+func TestLogFragmented(t *testing.T) {
+	buf := new(bytes.Buffer)
+
+	records := make([][]byte, 4)
+
+	records[0] = repeatedBytes([]byte("xyz"), 10000)
+	records[1] = repeatedBytes([]byte("abcde"), 10000)
+	records[2] = repeatedBytes([]byte("xxxxxx"), 10000)
+	records[3] = repeatedBytes([]byte("0123456789"), 10000)
+
+	writer := NewLogWriter(buf)
+
+	for _, r := range records {
+		err := writer.AddRecord(r)
+		require.NoError(t, err)
+	}
+
+	reader := NewLogReader(buf)
+
+	for _, r := range records {
+		record, ok := reader.ReadRecord()
+		require.True(t, ok)
+		require.Equal(t, r, record)
+	}
+
+	_, ok := reader.ReadRecord()
+	require.False(t, ok)
+}
+
+func repeatedBytes(input []byte, n int) []byte {
+	r := make([]byte, 0, len(input)*n)
+	for i := 0; i < n; i++ {
+		r = append(r, input...)
+	}
+	return r
+}
