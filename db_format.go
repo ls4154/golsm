@@ -8,7 +8,7 @@ import (
 
 const numLevels = 7
 
-type ValueType uint8
+type ValueType byte
 
 const (
 	TypeDeletion ValueType = 0

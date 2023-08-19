@@ -1,6 +1,7 @@
 package util
 
 import (
+	"encoding/binary"
 	"fmt"
 	"runtime"
 )
@@ -24,4 +25,18 @@ func Assert(cond bool) {
 		panic(fmt.Sprintf("assertion failed (%s:%d:%s)", file, no, name))
 	}
 	panic("assertion failed")
+}
+
+func AppendLengthPrefixedBytes(dest, value []byte) []byte {
+	dest = binary.AppendUvarint(dest, uint64(len(value)))
+	dest = append(dest, value...)
+	return dest
+}
+
+func GetLengthPrefixedBytes(input []byte) ([]byte, int) {
+	length, n := binary.Uvarint(input)
+	if n <= 0 {
+		return nil, 0
+	}
+	return input[n : n+int(length)], n + int(length)
 }

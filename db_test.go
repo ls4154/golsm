@@ -1,6 +1,7 @@
 package goldb
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -57,6 +58,36 @@ func TestDBBasic(t *testing.T) {
 
 	_, err = db.Get(key3, nil)
 	require.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestBatch(t *testing.T) {
+	db, err := Open(DefaultOptions(), "/tmp/ldb-batch")
+	require.NoError(t, err)
+
+	batch := NewWriteBatch()
+	for i := 0; i < 10; i++ {
+		batch.Put([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("value%d", i)))
+	}
+	err = db.Write(batch, WriteOptions{})
+	require.NoError(t, err)
+
+	for i := 0; i < 10; i++ {
+		key, err := db.Get([]byte(fmt.Sprintf("key%d", i)), nil)
+		require.NoError(t, err)
+		require.Equal(t, fmt.Sprintf("value%d", i), string(key))
+	}
+
+	batch = NewWriteBatch()
+	for i := 0; i < 10; i++ {
+		batch.Delete([]byte(fmt.Sprintf("key%d", i)))
+	}
+	err = db.Write(batch, WriteOptions{})
+	require.NoError(t, err)
+
+	for i := 0; i < 10; i++ {
+		_, err := db.Get([]byte(fmt.Sprintf("key%d", i)), nil)
+		require.ErrorIs(t, err, ErrNotFound)
+	}
 }
 
 func TestSnapshot(t *testing.T) {

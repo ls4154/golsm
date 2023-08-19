@@ -16,12 +16,14 @@ func open(options *Options, dbname string) (DB, error) {
 	icmp := &InternalKeyComparator{
 		userCmp: options.Comparator,
 	}
+	mem := NewMemTable(icmp)
 	vset := NewVersionSet(dbname)
+
 	db := &dbImpl{
 		dbname:   dbname,
 		icmp:     icmp,
 		versions: vset,
-		mem:      NewMemTable(icmp),
+		mem:      mem,
 	}
 
 	db.mu.Lock()
@@ -52,35 +54,32 @@ func (db *dbImpl) Get(key []byte, options *ReadOptions) ([]byte, error) {
 }
 
 func (db *dbImpl) Put(key []byte, value []byte, options WriteOptions) error {
-	if key == nil {
-		return ErrInvalidArgument
-	}
-
-	db.mu.Lock()
-	defer db.mu.Unlock()
-
-	seq := db.versions.GetLastSequence() + 1
-	db.mem.Put(seq, key, value)
-	db.versions.SetLastSequence(seq)
-
-	return nil
-}
-
-func (db *dbImpl) Write(batch *WriteBatch, options WriteOptions) error {
-	panic("unimplemented")
+	batch := NewWriteBatch()
+	batch.Put(key, value)
+	return db.Write(batch, options)
 }
 
 func (db *dbImpl) Delete(key []byte, options WriteOptions) error {
-	if key == nil {
-		return ErrInvalidArgument
-	}
+	batch := NewWriteBatch()
+	batch.Delete(key)
+	return db.Write(batch, options)
+}
 
+func (db *dbImpl) Write(batch *WriteBatch, options WriteOptions) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
-	seq := db.versions.GetLastSequence() + 1
-	db.mem.Delete(seq, key)
-	db.versions.SetLastSequence(seq)
+	// TODO WAL
+
+	lastSeq := db.versions.GetLastSequence()
+	batch.setSequence(lastSeq + 1)
+
+	err := batch.InsertIntoMemTable(db.mem)
+	if err != nil {
+		return err
+	}
+
+	db.versions.SetLastSequence(lastSeq + uint64(batch.count()))
 
 	return nil
 }
