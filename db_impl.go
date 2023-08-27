@@ -1,7 +1,12 @@
 package goldb
 
 import (
+	"io"
+	"strings"
 	"sync"
+
+	"github.com/ls4154/goldb/env"
+	"github.com/ls4154/goldb/log"
 )
 
 type dbImpl struct {
@@ -10,6 +15,9 @@ type dbImpl struct {
 	versions *VersionSet
 	mem      *MemTable
 	mu       sync.Mutex
+	env      env.Env
+	log      *log.LogWriter
+	logfile  env.WritableFile
 }
 
 func open(options *Options, dbname string) (DB, error) {
@@ -18,16 +26,57 @@ func open(options *Options, dbname string) (DB, error) {
 	}
 	mem := NewMemTable(icmp)
 	vset := NewVersionSet(dbname)
+	env := env.DefaultEnv()
 
 	db := &dbImpl{
 		dbname:   dbname,
 		icmp:     icmp,
 		versions: vset,
 		mem:      mem,
+		env:      env,
 	}
 
 	db.mu.Lock()
 	defer db.mu.Unlock()
+
+	env.CreateDir(dbname)
+
+	maxSequence := int64(0)
+	logName := LogFileName(db.dbname, 77)
+	if env.FileExists(logName) {
+		// recover log
+		f, err := env.NewReadableFile(logName)
+		if err != nil {
+			return nil, err
+		}
+		reader := log.NewLogReader(f)
+		for {
+			record, ok := reader.ReadRecord()
+			if !ok {
+				break
+			}
+
+			batch := WriteBatch{
+				rep: record,
+			}
+			err := batch.InsertIntoMemTable(mem)
+			if err != nil {
+				return nil, err
+			}
+			lastSeq := batch.sequence() + uint64(batch.count()) - 1
+			if lastSeq > uint64(maxSequence) {
+				maxSequence = int64(lastSeq)
+			}
+		}
+	}
+	vset.SetLastSequence(uint64(maxSequence))
+
+	f, err := env.NewAppendableFile(logName)
+	if err != nil {
+		return nil, err
+	}
+	db.log = log.NewLogWriter(f)
+	db.logfile = f
 
 	return db, nil
 }
@@ -69,12 +118,15 @@ func (db *dbImpl) Write(batch *WriteBatch, options WriteOptions) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
-	// TODO WAL
-
 	lastSeq := db.versions.GetLastSequence()
 	batch.setSequence(lastSeq + 1)
 
-	err := batch.InsertIntoMemTable(db.mem)
+	err := db.log.AddRecord(batch.contents())
+	if err != nil {
+		return err
+	}
+
+	err = batch.InsertIntoMemTable(db.mem)
 	if err != nil {
 		return err
 	}
@@ -99,6 +151,43 @@ func (db *dbImpl) GetSnapshot() *Snapshot {
 	return s
 }
 
-func (*dbImpl) Close() error {
+func (db *dbImpl) Close() error {
+	db.logfile.Sync()
+	db.logfile.Close()
+	return nil
+}
+
+func SetCurrentFile(env env.Env, dbname string, num uint64) error {
+	manifest := DescriptorFileName(dbname, num)
+	contents := strings.TrimPrefix(manifest, dbname)
+
+	tmp := TempFileName(dbname, num)
+	f, err := env.NewWritableFile(tmp)
+	if err != nil {
+		return err
+	}
+
+	_, err = io.WriteString(f, contents+"\n")
+	if err != nil {
+		env.RemoveFile(tmp)
+		return err
+	}
+	err = f.Sync()
+	if err != nil {
+		env.RemoveFile(tmp)
+		return err
+	}
+	err = f.Close()
+	if err != nil {
+		env.RemoveFile(tmp)
+		return err
+	}
+
+	err = env.RenameFile(tmp, CurrentFileName(dbname))
+	if err != nil {
+		env.RemoveFile(tmp)
+		return err
+	}
+
 	return nil
 }

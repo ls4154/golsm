@@ -8,7 +8,8 @@ import (
 )
 
 func TestDBBasic(t *testing.T) {
-	db, err := Open(DefaultOptions(), "/tmp/ldb-basic")
+	testDir := t.TempDir()
+	db, err := Open(DefaultOptions(), testDir)
 	require.NoError(t, err)
 
 	key1, val1 := []byte("key1"), []byte("some value")
@@ -58,10 +59,13 @@ func TestDBBasic(t *testing.T) {
 
 	_, err = db.Get(key3, nil)
 	require.ErrorIs(t, err, ErrNotFound)
+
+	db.Close()
 }
 
 func TestBatch(t *testing.T) {
-	db, err := Open(DefaultOptions(), "/tmp/ldb-batch")
+	testDir := t.TempDir()
+	db, err := Open(DefaultOptions(), testDir)
 	require.NoError(t, err)
 
 	batch := NewWriteBatch()
@@ -88,10 +92,13 @@ func TestBatch(t *testing.T) {
 		_, err := db.Get([]byte(fmt.Sprintf("key%d", i)), nil)
 		require.ErrorIs(t, err, ErrNotFound)
 	}
+
+	db.Close()
 }
 
 func TestSnapshot(t *testing.T) {
-	db, err := Open(DefaultOptions(), "/tmp/ldb-snapshot")
+	testDir := t.TempDir()
+	db, err := Open(DefaultOptions(), testDir)
 	require.NoError(t, err)
 
 	key1, val1 := []byte("key1"), []byte("v1")
@@ -124,10 +131,13 @@ func TestSnapshot(t *testing.T) {
 	require.Equal(t, val2, val)
 
 	snap.Release()
+
+	db.Close()
 }
 
 func TestSnapshotDelete(t *testing.T) {
-	db, err := Open(DefaultOptions(), "/tmp/ldb-snapshot")
+	testDir := t.TempDir()
+	db, err := Open(DefaultOptions(), testDir)
 	require.NoError(t, err)
 
 	key, val := []byte("key"), []byte("val")
@@ -144,4 +154,32 @@ func TestSnapshotDelete(t *testing.T) {
 	require.Equal(t, val, readVal)
 
 	snap.Release()
+
+	db.Close()
+}
+
+func TestRecover(t *testing.T) {
+	testDir := t.TempDir()
+	db, err := Open(DefaultOptions(), testDir)
+	require.NoError(t, err)
+
+	keys := []string{"foo", "bar", "hello", "empty", ""}
+	values := []string{"foovalue", "barvalue", "world", "", "empty"}
+	for i := range keys {
+		err = db.Put([]byte(keys[i]), []byte(values[i]), WriteOptions{})
+		require.NoError(t, err)
+	}
+	err = db.Close()
+	require.NoError(t, err)
+
+	db, err = Open(DefaultOptions(), testDir)
+	require.NoError(t, err)
+
+	for i := range keys {
+		val, err := db.Get([]byte(keys[i]), nil)
+		require.NoError(t, err)
+		require.Equal(t, values[i], string(val))
+	}
+
+	db.Close()
 }
