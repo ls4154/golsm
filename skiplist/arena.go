@@ -3,7 +3,7 @@ package skiplist
 import (
 	"unsafe"
 
-	"github.com/ls4154/goldb/util"
+	"github.com/ls4154/golsm/util"
 )
 
 type Arena struct {

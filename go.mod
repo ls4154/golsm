@@ -1,4 +1,4 @@
-module github.com/ls4154/goldb
+module github.com/ls4154/golsm
 
 go 1.20
 

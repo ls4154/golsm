@@ -1,9 +1,9 @@
-package goldb
+package golsm
 
 import (
 	"encoding/binary"
 
-	"github.com/ls4154/goldb/skiplist"
+	"github.com/ls4154/golsm/skiplist"
 )
 
 type MemTable struct {

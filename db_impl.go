@@ -1,12 +1,12 @@
-package goldb
+package golsm
 
 import (
 	"io"
 	"strings"
 	"sync"
 
-	"github.com/ls4154/goldb/env"
-	"github.com/ls4154/goldb/log"
+	"github.com/ls4154/golsm/env"
+	"github.com/ls4154/golsm/log"
 )
 
 type dbImpl struct {
@@ -127,6 +127,12 @@ func (db *dbImpl) Write(batch *WriteBatch, options WriteOptions) error {
 	err := db.log.AddRecord(batch.contents())
 	if err != nil {
 		return err
+	}
+
+	if options.Sync {
+		err := db.logfile.Sync()
+		// TODO sync error
+		_ = err
 	}
 
 	err = batch.InsertIntoMemTable(db.mem)

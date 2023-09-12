@@ -3,7 +3,7 @@ package log
 import (
 	"io"
 
-	"github.com/ls4154/goldb/util"
+	"github.com/ls4154/golsm/util"
 )
 
 type LogWriter struct {

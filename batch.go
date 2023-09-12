@@ -1,10 +1,10 @@
-package goldb
+package golsm
 
 import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/ls4154/goldb/util"
+	"github.com/ls4154/golsm/util"
 )
 
 // Header: sequence(8B), count(4B)

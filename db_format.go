@@ -1,9 +1,9 @@
-package goldb
+package golsm
 
 import (
 	"encoding/binary"
 
-	"github.com/ls4154/goldb/util"
+	"github.com/ls4154/golsm/util"
 )
 
 const numLevels = 7
