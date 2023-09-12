@@ -40,3 +40,11 @@ func GetLengthPrefixedBytes(input []byte) ([]byte, int) {
 	}
 	return input[n : n+int(length)], n + int(length)
 }
+
+func MinInt(a, b int) int {
+	if a <= b {
+		return a
+	} else {
+		return b
+	}
+}
