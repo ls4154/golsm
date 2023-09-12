@@ -31,6 +31,8 @@ func (mt *MemTable) Delete(seq uint64, key []byte) {
 }
 
 func (mt *MemTable) Add(seq uint64, valueType ValueType, key, value []byte) {
+	// key format: key + tag
+	//   tag: (seq << 8) | type
 	internalKey := mt.arena.Allocate(len(key) + 8)
 	copy(internalKey, key)
 	binary.LittleEndian.PutUint64(internalKey[len(key):], (seq<<8)|uint64(valueType))
@@ -71,6 +73,10 @@ func (mt *MemTable) Iterator() *MemTableIterator {
 	return &MemTableIterator{
 		listIter: mt.list.Iterator(),
 	}
+}
+
+func (mt *MemTable) ApproximateMemoryUsage() int {
+	return mt.arena.MemoryUsage()
 }
 
 var _ internalIterator = &MemTableIterator{}

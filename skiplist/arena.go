@@ -12,6 +12,7 @@ type Arena struct {
 	allocPos     int
 	bytesLeft    int
 	blockSize    int
+	memUsage     int
 }
 
 func NewArena(blockSize int) *Arena {
@@ -72,7 +73,12 @@ func (a *Arena) allocateNewBlock(bytes int) []byte {
 	util.Assert(uintptr(unsafe.Pointer(&block[0]))%align == 0)
 
 	a.blocks = append(a.blocks, block)
+	a.memUsage += bytes
 	return block
+}
+
+func (a *Arena) MemoryUsage() int {
+	return a.memUsage
 }
 
 func bytesToPtr(m []byte) unsafe.Pointer {

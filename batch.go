@@ -7,7 +7,17 @@ import (
 	"github.com/ls4154/golsm/util"
 )
 
-// Header: sequence(8B), count(4B)
+// format:
+//   header:
+//     sequence number (8B)
+//     count of entries (4B)
+//   entries (count):
+//     type (1B)
+//     key length (varint)
+//     key (length-prefixed)
+//     value length (varint)
+//     value (length-prefixed)
+
 const writeBatchHeaderSize = 8 + 4
 
 type WriteBatch struct {
