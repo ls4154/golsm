@@ -123,14 +123,14 @@ func TestSnapshot(t *testing.T) {
 	val, err = db.Get(key2, &ReadOptions{Snapshot: snap})
 	require.ErrorIs(t, err, ErrNotFound)
 
-	snap.Release()
+	db.ReleaseSnapshot(snap)
 
 	snap = db.GetSnapshot()
 	val, err = db.Get(key1, &ReadOptions{Snapshot: snap})
 	require.NoError(t, err)
 	require.Equal(t, val2, val)
 
-	snap.Release()
+	db.ReleaseSnapshot(snap)
 
 	db.Close()
 }
@@ -153,7 +153,7 @@ func TestSnapshotDelete(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, val, readVal)
 
-	snap.Release()
+	db.ReleaseSnapshot(snap)
 
 	db.Close()
 }

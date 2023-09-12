@@ -11,6 +11,7 @@ type DB interface {
 	Write(batch *WriteBatch, options WriteOptions) error
 	NewIterator() (Iterator, error)
 	GetSnapshot() *Snapshot
+	ReleaseSnapshot(snap *Snapshot)
 	Close() error
 }
 

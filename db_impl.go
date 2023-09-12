@@ -10,14 +10,15 @@ import (
 )
 
 type dbImpl struct {
-	dbname   string
-	icmp     *InternalKeyComparator
-	versions *VersionSet
-	mem      *MemTable
-	mu       sync.Mutex
-	env      env.Env
-	log      *log.LogWriter
-	logfile  env.WritableFile
+	dbname    string
+	icmp      *InternalKeyComparator
+	versions  *VersionSet
+	snapshots *SnapshotList
+	mem       *MemTable
+	mu        sync.Mutex
+	env       env.Env
+	log       *log.LogWriter
+	logfile   env.WritableFile
 }
 
 func open(options *Options, dbname string) (DB, error) {
@@ -27,13 +28,15 @@ func open(options *Options, dbname string) (DB, error) {
 	mem := NewMemTable(icmp)
 	vset := NewVersionSet(dbname)
 	env := env.DefaultEnv()
+	snapshots := NewSnapshotList()
 
 	db := &dbImpl{
-		dbname:   dbname,
-		icmp:     icmp,
-		versions: vset,
-		mem:      mem,
-		env:      env,
+		dbname:    dbname,
+		icmp:      icmp,
+		versions:  vset,
+		snapshots: snapshots,
+		mem:       mem,
+		env:       env,
 	}
 
 	db.mu.Lock()
@@ -141,14 +144,14 @@ func (db *dbImpl) NewIterator() (Iterator, error) {
 }
 
 func (db *dbImpl) GetSnapshot() *Snapshot {
-	s := &Snapshot{}
+	seq := db.versions.GetLastSequence()
+	return db.snapshots.NewSnapshot(seq)
+}
 
+func (db *dbImpl) ReleaseSnapshot(snap *Snapshot) {
 	db.mu.Lock()
 	defer db.mu.Unlock()
-
-	s.seq = db.versions.GetLastSequence()
-
-	return s
+	db.snapshots.ReleaseSnapshot(snap)
 }
 
 func (db *dbImpl) Close() error {
