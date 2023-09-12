@@ -1,5 +1,7 @@
 package goldb
 
+import "sync/atomic"
+
 type VersionSet struct {
 	dbname string
 
@@ -15,9 +17,9 @@ func NewVersionSet(dbname string) *VersionSet {
 }
 
 func (vs *VersionSet) GetLastSequence() uint64 {
-	return vs.lastSequence
+	return atomic.LoadUint64(&vs.lastSequence)
 }
 
 func (vs *VersionSet) SetLastSequence(seq uint64) {
-	vs.lastSequence = seq
+	atomic.StoreUint64(&vs.lastSequence, seq)
 }

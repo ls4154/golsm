@@ -19,6 +19,8 @@ type dbImpl struct {
 	env       env.Env
 	log       *log.LogWriter
 	logfile   env.WritableFile
+
+	wmu sync.Mutex
 }
 
 func open(options *Options, dbname string) (DB, error) {
@@ -89,9 +91,7 @@ func (db *dbImpl) Get(key []byte, options *ReadOptions) ([]byte, error) {
 	if options != nil && options.Snapshot != nil {
 		seq = options.Snapshot.seq
 	} else {
-		db.mu.Lock()
 		seq = db.versions.GetLastSequence()
-		db.mu.Unlock()
 	}
 
 	value, deleted, exist := db.mem.Get(seq, key)
@@ -118,8 +118,8 @@ func (db *dbImpl) Delete(key []byte, options WriteOptions) error {
 }
 
 func (db *dbImpl) Write(batch *WriteBatch, options WriteOptions) error {
-	db.mu.Lock()
-	defer db.mu.Unlock()
+	db.wmu.Lock()
+	defer db.wmu.Unlock()
 
 	lastSeq := db.versions.GetLastSequence()
 	batch.setSequence(lastSeq + 1)
