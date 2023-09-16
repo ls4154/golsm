@@ -3,5 +3,6 @@ package db
 type Comparator interface {
 	Compare(a, b []byte) int
 	Name() string
-	// TODO FindShortestSeparator(start []byte) []byte
+	FindShortestSeparator(start *[]byte, limit []byte)
+	FindShortSuccessor(key *[]byte)
 }

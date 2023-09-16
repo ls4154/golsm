@@ -51,7 +51,7 @@ func NewTableBuilder(file env.WritableFile, cmp db.Comparator, blockSize int, co
 func (b *TableBuilder) Add(key, value []byte) {
 	if b.pendingIndexEntry {
 		util.Assert(b.block.Empty())
-		// TODO b.cmp.FindShortestSeaprator(b.lastKey, key)
+		b.cmp.FindShortestSeparator(&b.lastKey, key)
 		buf := [BlockHandleMaxLength]byte{}
 		h := b.pendingHandle.Append(buf[:0])
 		b.indexBlock.Add(b.lastKey, h)
@@ -171,7 +171,7 @@ func (b *TableBuilder) Finish() error {
 	// index block
 	if b.pendingIndexEntry {
 		util.Assert(b.block.Empty())
-		// TODO short successor
+		b.cmp.FindShortSuccessor(&b.lastKey)
 		var buf [BlockHandleMaxLength]byte
 		encoded := b.pendingHandle.Append(buf[:0])
 		b.indexBlock.Add(b.lastKey, encoded)
