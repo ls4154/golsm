@@ -48,3 +48,14 @@ func MinInt(a, b int) int {
 		return b
 	}
 }
+
+const MaskDelta = 0xa282ead8
+
+func MaskCRC32(crc uint32) uint32 {
+	return ((crc >> 15) | (crc << 17)) + MaskDelta
+}
+
+func UnmaskCRC32(masked uint32) uint32 {
+	rot := masked - MaskDelta
+	return (rot >> 17) | (rot << 15)
+}

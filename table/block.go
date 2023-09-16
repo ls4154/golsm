@@ -343,3 +343,7 @@ func (b *BlockBuilder) Reset() {
 	b.buf = b.buf[:0]
 	b.done = false
 }
+
+func (b *BlockBuilder) Empty() bool {
+	return len(b.buf) == 0
+}
