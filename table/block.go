@@ -100,6 +100,14 @@ func (it *BlockIterator) seekToRestartPoint(index uint32) {
 	it.curLength = 0
 }
 
+func (it *BlockIterator) courrptionError(err error) {
+	it.curOffset = len(it.data)
+	it.restartIndex = it.numRestart
+	it.err = err
+	it.key = it.key[:0]
+	it.value = nil
+}
+
 func (it *BlockIterator) parseNextEntry() bool {
 	it.curOffset = it.curOffset + it.curLength
 	if it.curOffset >= len(it.data) {
@@ -113,7 +121,7 @@ func (it *BlockIterator) parseNextEntry() bool {
 	// decode entry
 	shared, nonShared, valueLen, read, err := decodeBlockEntryLength(b)
 	if err != nil {
-		it.err = err
+		it.courrptionError(err)
 		return false
 	}
 	it.curLength = read + int(nonShared) + int(valueLen)
@@ -167,40 +175,107 @@ func decodeBlockEntryLength(b []byte) (uint32, uint32, uint32, int, error) {
 	return shared, nonShared, valueLen, 0, nil
 }
 
-func (b *BlockIterator) SeekToFirst() {
-	b.seekToRestartPoint(0)
-	b.parseNextEntry()
+func (it *BlockIterator) SeekToFirst() {
+	it.seekToRestartPoint(0)
+	it.parseNextEntry()
 }
 
-func (b *BlockIterator) Seek(target []byte) {
-	panic("todo")
+func (it *BlockIterator) Seek(target []byte) {
+	left := uint32(0)
+	right := it.numRestart - 1
+	curKeyCompare := 0
+
+	if it.Valid() {
+		curKeyCompare = it.cmp.Compare(it.key, target)
+		if curKeyCompare < 0 {
+			left = it.restartIndex
+		} else if curKeyCompare > 0 {
+			right = it.restartIndex
+		} else {
+			return
+		}
+	}
+
+	for left < right {
+		mid := (left + right + 1) / 2
+		regionOffset := it.getRestartPoint(mid)
+
+		b := it.data[regionOffset:]
+		shared, nonShared, _, read, err := decodeBlockEntryLength(b)
+		if err != nil || shared != 0 {
+			it.courrptionError(err)
+			return
+		}
+
+		midKey := b[read : read+int(nonShared)]
+		if it.cmp.Compare(midKey, target) < 0 {
+			left = mid
+		} else {
+			right = mid - 1
+		}
+	}
+
+	util.Assert(curKeyCompare == 0 || it.Valid())
+	skipSeek := left == it.restartIndex && curKeyCompare < 0
+	if !skipSeek {
+		it.seekToRestartPoint(left)
+	}
+
+	for {
+		if !it.parseNextEntry() {
+			return
+		}
+
+		if it.cmp.Compare(it.key, target) >= 0 {
+			return
+		}
+	}
 }
 
-func (b *BlockIterator) SeekToLast() {
-	panic("todo")
+func (it *BlockIterator) SeekToLast() {
+	it.seekToRestartPoint(it.numRestart - 1)
+	for it.parseNextEntry() && it.curOffset+it.curLength < len(it.data) {
+		// keep skipping
+	}
 }
 
-func (b *BlockIterator) Next() {
-	util.Assert(b.Valid())
-	b.parseNextEntry()
+func (it *BlockIterator) Next() {
+	util.Assert(it.Valid())
+	it.parseNextEntry()
 }
 
-func (b *BlockIterator) Prev() {
-	panic("todo")
+func (it *BlockIterator) Prev() {
+	util.Assert(it.Valid())
+
+	original := it.curOffset
+	for it.getRestartPoint(it.restartIndex) >= original {
+		if it.restartIndex == 0 {
+			// no more entries
+			it.curOffset = len(it.data)
+			it.restartIndex = it.numRestart
+			return
+		}
+		it.restartIndex--
+	}
+
+	it.seekToRestartPoint(it.restartIndex)
+	for it.parseNextEntry() && it.curOffset+it.curLength < original {
+		// loop until original entry
+	}
 }
 
-func (b *BlockIterator) Key() []byte {
-	util.Assert(b.Valid())
-	return b.key
+func (it *BlockIterator) Key() []byte {
+	util.Assert(it.Valid())
+	return it.key
 }
 
-func (b *BlockIterator) Value() []byte {
-	util.Assert(b.Valid())
-	return b.value
+func (it *BlockIterator) Value() []byte {
+	util.Assert(it.Valid())
+	return it.value
 }
 
-func (b *BlockIterator) Error() error {
-	return b.err
+func (it *BlockIterator) Error() error {
+	return it.err
 }
 
 type BlockBuilder struct {
