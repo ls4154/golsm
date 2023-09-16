@@ -1,4 +1,4 @@
-package golsm
+package impl
 
 type SnapshotList struct {
 	head Snapshot
@@ -10,6 +10,8 @@ type Snapshot struct {
 	prev *Snapshot
 	next *Snapshot
 }
+
+func (s *Snapshot) Snapshot() {}
 
 func NewSnapshotList() *SnapshotList {
 	l := &SnapshotList{}

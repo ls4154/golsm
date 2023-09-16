@@ -1,20 +1,23 @@
-package golsm
+package impl
 
 import (
 	"io"
 	"strings"
 	"sync"
 
+	"github.com/ls4154/golsm/db"
 	"github.com/ls4154/golsm/env"
 	"github.com/ls4154/golsm/log"
 )
 
 type dbImpl struct {
 	dbname    string
+	options   db.Options
 	icmp      *InternalKeyComparator
 	versions  *VersionSet
 	snapshots *SnapshotList
 	mem       *MemTable
+	imm       *MemTable
 	mu        sync.Mutex
 	env       env.Env
 	log       *log.LogWriter
@@ -23,7 +26,7 @@ type dbImpl struct {
 	wmu sync.Mutex
 }
 
-func open(options *Options, dbname string) (DB, error) {
+func Open(options *db.Options, dbname string) (db.DB, error) {
 	icmp := &InternalKeyComparator{
 		userCmp: options.Comparator,
 	}
@@ -34,6 +37,7 @@ func open(options *Options, dbname string) (DB, error) {
 
 	db := &dbImpl{
 		dbname:    dbname,
+		options:   *options,
 		icmp:      icmp,
 		versions:  vset,
 		snapshots: snapshots,
@@ -61,7 +65,7 @@ func open(options *Options, dbname string) (DB, error) {
 				break
 			}
 
-			batch := WriteBatch{
+			batch := WriteBatchImpl{
 				rep: record,
 			}
 			err := batch.InsertIntoMemTable(mem)
@@ -86,83 +90,121 @@ func open(options *Options, dbname string) (DB, error) {
 	return db, nil
 }
 
-func (db *dbImpl) Get(key []byte, options *ReadOptions) ([]byte, error) {
+func (d *dbImpl) Get(key []byte, options *db.ReadOptions) ([]byte, error) {
 	var seq uint64
 	if options != nil && options.Snapshot != nil {
-		seq = options.Snapshot.seq
+		seq = options.Snapshot.(*Snapshot).seq
 	} else {
-		seq = db.versions.GetLastSequence()
+		seq = d.versions.GetLastSequence()
 	}
 
-	value, deleted, exist := db.mem.Get(seq, key)
+	value, deleted, exist := d.mem.Get(seq, key)
 	if exist {
 		if deleted {
-			return nil, ErrNotFound
+			return nil, db.ErrNotFound
 		}
 		return value, nil
 	}
 
-	return nil, ErrNotFound
+	return nil, db.ErrNotFound
 }
 
-func (db *dbImpl) Put(key []byte, value []byte, options WriteOptions) error {
+func (d *dbImpl) Put(key []byte, value []byte, options db.WriteOptions) error {
 	batch := NewWriteBatch()
 	batch.Put(key, value)
-	return db.Write(batch, options)
+	return d.Write(batch, options)
 }
 
-func (db *dbImpl) Delete(key []byte, options WriteOptions) error {
+func (d *dbImpl) Delete(key []byte, options db.WriteOptions) error {
 	batch := NewWriteBatch()
 	batch.Delete(key)
-	return db.Write(batch, options)
+	return d.Write(batch, options)
 }
 
-func (db *dbImpl) Write(batch *WriteBatch, options WriteOptions) error {
-	db.wmu.Lock()
-	defer db.wmu.Unlock()
+func (d *dbImpl) Write(updates db.WriteBatch, options db.WriteOptions) error {
+	d.wmu.Lock()
+	defer d.wmu.Unlock()
 
-	lastSeq := db.versions.GetLastSequence()
+	lastSeq := d.versions.GetLastSequence()
+	batch := updates.(*WriteBatchImpl)
 	batch.setSequence(lastSeq + 1)
 
-	err := db.log.AddRecord(batch.contents())
+	err := d.log.AddRecord(batch.contents())
 	if err != nil {
 		return err
 	}
 
 	if options.Sync {
-		err := db.logfile.Sync()
+		err := d.logfile.Sync()
 		// TODO sync error
 		_ = err
 	}
 
-	err = batch.InsertIntoMemTable(db.mem)
+	err = batch.InsertIntoMemTable(d.mem)
 	if err != nil {
 		return err
 	}
 
-	db.versions.SetLastSequence(lastSeq + uint64(batch.count()))
+	d.versions.SetLastSequence(lastSeq + uint64(batch.count()))
 
 	return nil
 }
 
-func (db *dbImpl) NewIterator() (Iterator, error) {
+func (d *dbImpl) makeRoomForWrite() error {
+	return nil
+	panic("TODO")
+
+	// TODO mu
+	for {
+		if d.mem.ApproximateMemoryUsage() <= d.options.WriteBufferSize {
+			// ok
+			break
+		} else if d.imm != nil {
+			// TODO wait
+		} else {
+			// TODO switch
+			logNum := uint64(78) // TODO
+			f, err := d.env.NewWritableFile(LogFileName(d.dbname, logNum))
+			if err != nil {
+				return err
+			}
+
+			err = d.logfile.Close()
+			if err != nil {
+				// TODO bg err
+			}
+
+			d.logfile = f
+			d.log = log.NewLogWriter(f)
+
+			d.imm = d.mem
+			d.mem = NewMemTable(d.icmp)
+
+			// TODO sched compaction
+		}
+	}
+	panic("TODO")
+}
+
+func (d *dbImpl) NewIterator() (db.Iterator, error) {
 	panic("unimplemented")
 }
 
-func (db *dbImpl) GetSnapshot() *Snapshot {
-	seq := db.versions.GetLastSequence()
-	return db.snapshots.NewSnapshot(seq)
+func (d *dbImpl) GetSnapshot() db.Snapshot {
+	seq := d.versions.GetLastSequence()
+	return d.snapshots.NewSnapshot(seq)
 }
 
-func (db *dbImpl) ReleaseSnapshot(snap *Snapshot) {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-	db.snapshots.ReleaseSnapshot(snap)
+func (d *dbImpl) ReleaseSnapshot(snap db.Snapshot) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	s := snap.(*Snapshot)
+	d.snapshots.ReleaseSnapshot(s)
 }
 
-func (db *dbImpl) Close() error {
-	db.logfile.Sync()
-	db.logfile.Close()
+func (d *dbImpl) Close() error {
+	d.logfile.Sync()
+	d.logfile.Close()
 	return nil
 }
 

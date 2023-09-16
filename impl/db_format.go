@@ -1,8 +1,9 @@
-package golsm
+package impl
 
 import (
 	"encoding/binary"
 
+	"github.com/ls4154/golsm/db"
 	"github.com/ls4154/golsm/util"
 )
 
@@ -20,7 +21,7 @@ const (
 type InternalKey []byte
 
 type InternalKeyComparator struct {
-	userCmp Comparator
+	userCmp db.Comparator
 }
 
 func (ic *InternalKeyComparator) Compare(a []byte, b []byte) int {

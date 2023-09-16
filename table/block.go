@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 
+	"github.com/ls4154/golsm/db"
 	"github.com/ls4154/golsm/util"
 )
 
@@ -49,11 +50,13 @@ func (b *Block) RestartArray() []byte {
 	return b.contents[len(b.contents)-4-int(arrLen) : len(b.contents)-4]
 }
 
-func (b *Block) NewBlockIterator() *BlockIterator {
+func (b *Block) NewBlockIterator(cmp db.Comparator) *BlockIterator {
 	data := b.Data()
 	restartArray := b.RestartArray()
 	numRestart := b.NumRestarts()
 	return &BlockIterator{
+		cmp: cmp,
+
 		data:         data,
 		restartArray: restartArray,
 		numRestart:   numRestart,
@@ -64,6 +67,8 @@ func (b *Block) NewBlockIterator() *BlockIterator {
 }
 
 type BlockIterator struct {
+	cmp db.Comparator
+
 	data         []byte
 	restartArray []byte
 	numRestart   uint32

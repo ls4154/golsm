@@ -1,4 +1,4 @@
-package golsm
+package impl
 
 import (
 	"fmt"

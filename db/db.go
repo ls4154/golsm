@@ -1,17 +1,19 @@
-package golsm
+package db
 
 import (
 	"errors"
+
+	"github.com/ls4154/golsm/util"
 )
 
 type DB interface {
 	Get(key []byte, options *ReadOptions) ([]byte, error)
 	Put(key, value []byte, options WriteOptions) error
 	Delete(key []byte, options WriteOptions) error
-	Write(batch *WriteBatch, options WriteOptions) error
+	Write(batch WriteBatch, options WriteOptions) error
 	NewIterator() (Iterator, error)
-	GetSnapshot() *Snapshot
-	ReleaseSnapshot(snap *Snapshot)
+	GetSnapshot() Snapshot
+	ReleaseSnapshot(snap Snapshot)
 	Close() error
 }
 
@@ -24,6 +26,10 @@ type Iterator interface {
 	Seek(target []byte)
 	Key() []byte
 	Value() []byte
+}
+
+type Snapshot interface {
+	Snapshot()
 }
 
 type CompressionType uint8
@@ -44,7 +50,7 @@ type Options struct {
 type ReadOptions struct {
 	VerifyChecksum bool
 	BypassCache    bool
-	Snapshot       *Snapshot
+	Snapshot       Snapshot
 }
 
 type WriteOptions struct {
@@ -65,10 +71,6 @@ func DefaultOptions() *Options {
 		MaxFileSize:     4 * 1024 * 1024,
 		WriteBufferSize: 4 * 1024 * 1024,
 		Compression:     SnappyCompression,
-		Comparator:      BytewiseComparator,
+		Comparator:      util.BytewiseComparator,
 	}
-}
-
-func Open(options *Options, path string) (DB, error) {
-	return open(options, path)
 }

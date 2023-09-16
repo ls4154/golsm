@@ -1,9 +1,10 @@
-package golsm
+package impl
 
 import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/ls4154/golsm/db"
 	"github.com/ls4154/golsm/util"
 )
 
@@ -20,50 +21,50 @@ import (
 
 const writeBatchHeaderSize = 8 + 4
 
-type WriteBatch struct {
+type WriteBatchImpl struct {
 	rep []byte
 }
 
-func NewWriteBatch() *WriteBatch {
-	return &WriteBatch{
+func NewWriteBatch() *WriteBatchImpl {
+	return &WriteBatchImpl{
 		rep: make([]byte, writeBatchHeaderSize),
 	}
 }
 
-func (b *WriteBatch) sequence() uint64 {
+func (b *WriteBatchImpl) sequence() uint64 {
 	return binary.LittleEndian.Uint64(b.rep[0:8])
 }
 
-func (b *WriteBatch) setSequence(seq uint64) {
+func (b *WriteBatchImpl) setSequence(seq uint64) {
 	binary.LittleEndian.PutUint64(b.rep[0:8], seq)
 }
 
-func (b *WriteBatch) count() uint32 {
+func (b *WriteBatchImpl) count() uint32 {
 	return binary.LittleEndian.Uint32(b.rep[8:12])
 }
 
-func (b *WriteBatch) setCount(seq uint32) {
+func (b *WriteBatchImpl) setCount(seq uint32) {
 	binary.LittleEndian.PutUint32(b.rep[8:12], seq)
 }
 
-func (b *WriteBatch) contents() []byte {
+func (b *WriteBatchImpl) contents() []byte {
 	return b.rep
 }
 
-func (b *WriteBatch) Put(key, value []byte) {
+func (b *WriteBatchImpl) Put(key, value []byte) {
 	b.setCount(b.count() + 1)
 	b.rep = append(b.rep, byte(TypeValue))
 	b.rep = util.AppendLengthPrefixedBytes(b.rep, key)
 	b.rep = util.AppendLengthPrefixedBytes(b.rep, value)
 }
 
-func (b *WriteBatch) Delete(key []byte) {
+func (b *WriteBatchImpl) Delete(key []byte) {
 	b.setCount(b.count() + 1)
 	b.rep = append(b.rep, byte(TypeDeletion))
 	b.rep = util.AppendLengthPrefixedBytes(b.rep, key)
 }
 
-func (b *WriteBatch) InsertIntoMemTable(mt *MemTable) error {
+func (b *WriteBatchImpl) InsertIntoMemTable(mt *MemTable) error {
 	seq := b.sequence()
 	cnt := int(b.count())
 	rep := b.rep[writeBatchHeaderSize:]
@@ -75,13 +76,13 @@ func (b *WriteBatch) InsertIntoMemTable(mt *MemTable) error {
 		case TypeValue:
 			key, n := util.GetLengthPrefixedBytes(rep)
 			if n <= 0 {
-				return fmt.Errorf("%w: bad WriteBatch Put", ErrCorruption)
+				return fmt.Errorf("%w: bad WriteBatch Put", db.ErrCorruption)
 			}
 			rep = rep[n:]
 
 			val, n := util.GetLengthPrefixedBytes(rep)
 			if n <= 0 {
-				return fmt.Errorf("%w: bad WriteBatch Put", ErrCorruption)
+				return fmt.Errorf("%w: bad WriteBatch Put", db.ErrCorruption)
 			}
 			rep = rep[n:]
 
@@ -89,19 +90,19 @@ func (b *WriteBatch) InsertIntoMemTable(mt *MemTable) error {
 		case TypeDeletion:
 			key, n := util.GetLengthPrefixedBytes(rep)
 			if n <= 0 {
-				return fmt.Errorf("%w: bad WriteBatch Put", ErrCorruption)
+				return fmt.Errorf("%w: bad WriteBatch Put", db.ErrCorruption)
 			}
 			rep = rep[n:]
 
 			mt.Delete(seq, key)
 		default:
-			return fmt.Errorf("%w: unknown WriteBatch tag", ErrCorruption)
+			return fmt.Errorf("%w: unknown WriteBatch tag", db.ErrCorruption)
 		}
 		found++
 	}
 
 	if cnt != found {
-		return fmt.Errorf("%w: wrong WriteBatch count", ErrCorruption)
+		return fmt.Errorf("%w: wrong WriteBatch count", db.ErrCorruption)
 	}
 
 	return nil

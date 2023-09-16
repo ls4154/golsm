@@ -1,4 +1,4 @@
-package golsm
+package impl
 
 type dbIter struct{}
 

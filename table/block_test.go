@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/ls4154/golsm/util"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,7 +30,7 @@ func TestBlock(t *testing.T) {
 	block, err := NewBlock(blockData)
 	require.NoError(t, err)
 
-	it := block.NewBlockIterator()
+	it := block.NewBlockIterator(util.BytewiseComparator)
 
 	it.SeekToFirst()
 	for i := 0; i < numEntries; i++ {
