@@ -1,6 +1,7 @@
 package env
 
 import (
+	"bufio"
 	"io"
 	"os"
 )
@@ -36,8 +37,46 @@ type RandomAccessFile interface {
 type WritableFile interface {
 	io.Writer
 	io.Closer
+	Flush() error
 	Sync() error
-	// TODO Flush
+}
+
+const writableFileBufferSize = 64 * 1024 // 64 KB
+
+type bufWritableFile struct {
+	f *os.File
+	w *bufio.Writer
+}
+
+func newBufWritableFile(f *os.File) *bufWritableFile {
+	return &bufWritableFile{
+		f: f,
+		w: bufio.NewWriterSize(f, writableFileBufferSize),
+	}
+}
+
+func (b *bufWritableFile) Write(p []byte) (int, error) {
+	return b.w.Write(p)
+}
+
+func (b *bufWritableFile) Flush() error {
+	return b.w.Flush()
+}
+
+func (b *bufWritableFile) Sync() error {
+	if err := b.w.Flush(); err != nil {
+		return err
+	}
+	return b.f.Sync()
+}
+
+func (b *bufWritableFile) Close() error {
+	err1 := b.w.Flush()
+	err2 := b.f.Close()
+	if err1 != nil {
+		return err1
+	}
+	return err2
 }
 
 type FileLock struct{}
@@ -75,7 +114,7 @@ func (e *GenericEnv) NewWritableFile(name string) (WritableFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	return f, nil
+	return newBufWritableFile(f), nil
 }
 
 func (e *GenericEnv) NewAppendableFile(name string) (WritableFile, error) {
@@ -83,7 +122,7 @@ func (e *GenericEnv) NewAppendableFile(name string) (WritableFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	return f, nil
+	return newBufWritableFile(f), nil
 }
 
 func (e *GenericEnv) RemoveFile(name string) error {
@@ -96,10 +135,7 @@ func (e *GenericEnv) RenameFile(src, target string) error {
 
 func (e *GenericEnv) FileExists(name string) bool {
 	_, err := os.Stat(name)
-	if err != nil {
-		return false
-	}
-	return true
+	return err == nil
 }
 
 func (e *GenericEnv) GetFileSize(name string) (uint64, error) {
@@ -115,6 +151,7 @@ func (e *GenericEnv) GetChildren(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer f.Close()
 
 	dents, err := f.ReadDir(0)
 	if err != nil {

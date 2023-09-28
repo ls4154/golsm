@@ -1,6 +1,7 @@
 package table
 
 import (
+	"encoding/binary"
 	"fmt"
 	"testing"
 
@@ -14,8 +15,7 @@ func TestBlock(t *testing.T) {
 	const numEntries = 1000
 
 	for i := 0; i < numEntries; i++ {
-		key := fmt.Sprintf("test-key-%05d", i)
-		value := fmt.Sprintf("test value %05d", i)
+		key, value := getTestKeyValue(i)
 
 		builder.Add([]byte(key), []byte(value))
 	}
@@ -34,8 +34,7 @@ func TestBlock(t *testing.T) {
 
 	it.SeekToFirst()
 	for i := 0; i < numEntries; i++ {
-		key := fmt.Sprintf("test-key-%05d", i)
-		value := fmt.Sprintf("test value %05d", i)
+		key, value := getTestKeyValue(i)
 
 		require.True(t, it.Valid())
 		require.Equal(t, []byte(key), it.Key())
@@ -45,10 +44,9 @@ func TestBlock(t *testing.T) {
 	}
 	require.False(t, it.Valid())
 
-	it.Seek([]byte("test-key-00100"))
+	it.Seek(getTestKey(100))
 	for i := 100; i < numEntries; i++ {
-		key := fmt.Sprintf("test-key-%05d", i)
-		value := fmt.Sprintf("test value %05d", i)
+		key, value := getTestKeyValue(i)
 
 		require.True(t, it.Valid())
 		require.Equal(t, []byte(key), it.Key())
@@ -63,8 +61,7 @@ func TestBlock(t *testing.T) {
 
 	it.Seek([]byte(""))
 	for i := 0; i < numEntries; i++ {
-		key := fmt.Sprintf("test-key-%05d", i)
-		value := fmt.Sprintf("test value %05d", i)
+		key, value := getTestKeyValue(i)
 
 		require.True(t, it.Valid())
 		require.Equal(t, []byte(key), it.Key())
@@ -76,8 +73,7 @@ func TestBlock(t *testing.T) {
 
 	it.SeekToLast()
 	{
-		key := fmt.Sprintf("test-key-%05d", numEntries-1)
-		value := fmt.Sprintf("test value %05d", numEntries-1)
+		key, value := getTestKeyValue(numEntries - 1)
 
 		require.True(t, it.Valid())
 		require.Equal(t, []byte(key), it.Key())
@@ -89,8 +85,7 @@ func TestBlock(t *testing.T) {
 
 	it.SeekToLast()
 	for i := numEntries - 1; i >= 0; i-- {
-		key := fmt.Sprintf("test-key-%05d", i)
-		value := fmt.Sprintf("test value %05d", i)
+		key, value := getTestKeyValue(i)
 
 		require.True(t, it.Valid())
 		require.Equal(t, []byte(key), it.Key())
@@ -100,10 +95,9 @@ func TestBlock(t *testing.T) {
 	}
 	require.False(t, it.Valid())
 
-	it.Seek([]byte("test-key-00100"))
+	it.Seek(getTestKey(100))
 	for i := 100; i >= 0; i-- {
-		key := fmt.Sprintf("test-key-%05d", i)
-		value := fmt.Sprintf("test value %05d", i)
+		key, value := getTestKeyValue(i)
 
 		require.True(t, it.Valid())
 		require.Equal(t, []byte(key), it.Key())
@@ -115,8 +109,7 @@ func TestBlock(t *testing.T) {
 
 	it.SeekToFirst()
 	{
-		key := fmt.Sprintf("test-key-%05d", 0)
-		value := fmt.Sprintf("test value %05d", 0)
+		key, value := getTestKeyValue(0)
 
 		require.True(t, it.Valid())
 		require.Equal(t, []byte(key), it.Key())
@@ -125,4 +118,22 @@ func TestBlock(t *testing.T) {
 		it.Prev()
 	}
 	require.False(t, it.Valid())
+}
+
+func getTestKey(n int) []byte {
+	return []byte(fmt.Sprintf("test-key-%08d", n))
+}
+
+func getTestValue(n int) []byte {
+	return []byte(fmt.Sprintf("test-value-%08d", n))
+}
+
+func getTestKeyValue(n int) ([]byte, []byte) {
+	return getTestKey(n), getTestValue(n)
+}
+
+func getTestInternalKey(n int) []byte {
+	key := getTestKey(n)
+	ikey := []byte(key)
+	return binary.LittleEndian.AppendUint64(ikey, (uint64(n+1)<<8 | 1))
 }

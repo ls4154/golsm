@@ -3,59 +3,103 @@ package table
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"hash/crc32"
+
+	"github.com/ls4154/golsm/db"
+	"github.com/ls4154/golsm/env"
+	"github.com/ls4154/golsm/util"
 )
 
-const (
-	BlockTrailerSize = 5
-	MagicNumber      = 0xdb4775248b80fb57
-)
+type Table struct {
+	file env.RandomAccessFile
+	cmp  db.Comparator
 
-type Table interface{}
-
-const BlockHandleMaxLength = 10 + 10
-
-type BlockHandle struct {
-	Offset uint64
-	Size   uint64
+	indexBlock *Block
 }
 
-func (h BlockHandle) Append(buf []byte) []byte {
-	buf = binary.AppendUvarint(buf, uint64(h.Offset))
-	buf = binary.AppendUvarint(buf, uint64(h.Size))
-	return buf
-}
-
-func DecodeBlockHandle(buf []byte) (BlockHandle, error) {
-	h := BlockHandle{}
-	vint, read := binary.Uvarint(buf)
-	if read <= 0 {
-		return h, errors.New("bad block handle")
+func OpenTable(file env.RandomAccessFile, size uint64, cmp db.Comparator) (*Table, error) {
+	// Footer
+	var buf [FooterLength]byte
+	n, err := file.ReadAt(buf[:], int64(size)-FooterLength)
+	if err != nil {
+		return nil, err
 	}
-	h.Offset = vint
-
-	vint, read = binary.Uvarint(buf)
-	if read <= 0 {
-		return h, errors.New("bad block handle")
+	if n < FooterLength {
+		return nil, errors.New("truncated footer read")
 	}
-	h.Size = vint
+	footer, _, err := DecodeFooter(buf[:])
+	if err != nil {
+		return nil, err
+	}
 
-	return h, nil
+	// Index block
+	indexBlock, err := ReadBlock(file, &footer.IndexHandle)
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO filter block
+
+	return &Table{
+		file: file,
+		cmp:  cmp,
+
+		indexBlock: indexBlock,
+	}, nil
 }
 
-const FooterLength = 2*BlockHandleMaxLength + 8
-
-type Footer struct {
-	MetaindexHandle BlockHandle
-	IndexHandle     BlockHandle
+func (t *Table) NewIterator() db.Iterator {
+	return NewTwoLevelIterator(t.indexBlock.NewBlockIterator(t.cmp), t.NewBlockIteratorFromIndex)
 }
 
-func (f Footer) Append(buf []byte) []byte {
-	buf = f.MetaindexHandle.Append(buf)
-	buf = f.IndexHandle.Append(buf)
-	// padding
-	for len(buf) < 2*BlockHandleMaxLength {
-		buf = append(buf, 0)
+func (t *Table) NewBlockIteratorFromIndex(indexValue []byte) (db.Iterator, error) {
+	handle, _, err := DecodeBlockHandle(indexValue)
+	if err != nil {
+		return nil, err
 	}
-	buf = binary.LittleEndian.AppendUint64(buf, MagicNumber)
-	return buf
+	block, err := ReadBlock(t.file, &handle)
+	if err != nil {
+		return nil, err
+	}
+
+	return block.NewBlockIterator(t.cmp), nil
+}
+
+func ReadBlock(f env.RandomAccessFile, handle *BlockHandle) (*Block, error) {
+	buf := make([]byte, handle.Size+BlockTrailerSize)
+	rd, err := f.ReadAt(buf, int64(handle.Offset))
+	if err != nil {
+		return nil, err
+	}
+	if rd != int(handle.Size+BlockTrailerSize) {
+		return nil, errors.New("truncated block read")
+	}
+
+	// TODO verify checksum option
+	if true {
+		crc := util.UnmaskCRC32(binary.LittleEndian.Uint32(buf[handle.Size+1:]))
+
+		h := crc32.NewIEEE()
+		h.Write(buf[:handle.Size+1])
+		actual := h.Sum32()
+
+		if actual != crc {
+			return nil, errors.New("block checksum mismatch")
+		}
+	}
+
+	result := &Block{}
+
+	compressionType := db.CompressionType(buf[handle.Size])
+	switch compressionType {
+	case db.NoCompression:
+		result.contents = buf[:handle.Size]
+	case db.SnappyCompression:
+		panic("snappy compression not implemented yet")
+	default:
+		panic(fmt.Sprintf("invalid compression type: %d", compressionType))
+	}
+
+	return result, nil
 }

@@ -49,6 +49,11 @@ func NewTableBuilder(file env.WritableFile, cmp db.Comparator, blockSize int, co
 }
 
 func (b *TableBuilder) Add(key, value []byte) {
+	util.Assert(!b.closed)
+	if b.err != nil {
+		return
+	}
+
 	if b.pendingIndexEntry {
 		util.Assert(b.block.Empty())
 		b.cmp.FindShortestSeparator(&b.lastKey, key)
@@ -84,7 +89,11 @@ func (b *TableBuilder) Flush() {
 		return
 	}
 	b.pendingIndexEntry = true
-	// TODO flush file
+
+	err := b.file.Flush()
+	if err != nil {
+		b.err = err
+	}
 
 	// TODO filter block
 }

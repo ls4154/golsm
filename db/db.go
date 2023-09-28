@@ -19,13 +19,14 @@ type DB interface {
 
 type Iterator interface {
 	Valid() bool
-	Next()
-	Prev()
 	SeekToFirst()
 	SeekToLast()
 	Seek(target []byte)
+	Next()
+	Prev()
 	Key() []byte
 	Value() []byte
+	Error() error
 }
 
 type Snapshot interface {
