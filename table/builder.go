@@ -3,7 +3,6 @@ package table
 import (
 	"encoding/binary"
 	"fmt"
-	"hash/crc32"
 
 	"github.com/ls4154/golsm/db"
 	"github.com/ls4154/golsm/env"
@@ -134,7 +133,7 @@ func (b *TableBuilder) writeRawBlock(contents []byte, compression db.Compression
 	trailer := [BlockTrailerSize]byte{}
 	trailer[0] = byte(compression)
 
-	h := crc32.NewIEEE()
+	h := util.NewCRC32C()
 	h.Write(contents)
 	h.Write(trailer[0:1])
 	crc := h.Sum32()

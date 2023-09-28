@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"hash/crc32"
 
 	"github.com/ls4154/golsm/db"
 	"github.com/ls4154/golsm/env"
@@ -80,7 +79,7 @@ func ReadBlock(f env.RandomAccessFile, handle *BlockHandle) (*Block, error) {
 	if true {
 		crc := util.UnmaskCRC32(binary.LittleEndian.Uint32(buf[handle.Size+1:]))
 
-		h := crc32.NewIEEE()
+		h := util.NewCRC32C()
 		h.Write(buf[:handle.Size+1])
 		actual := h.Sum32()
 
