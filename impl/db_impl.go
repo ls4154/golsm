@@ -1,6 +1,7 @@
 package impl
 
 import (
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -8,6 +9,7 @@ import (
 	"github.com/ls4154/golsm/db"
 	"github.com/ls4154/golsm/env"
 	"github.com/ls4154/golsm/log"
+	"github.com/ls4154/golsm/util"
 )
 
 type dbImpl struct {
@@ -19,20 +21,25 @@ type dbImpl struct {
 	mem       *MemTable
 	imm       *MemTable
 	mu        sync.Mutex
-	env       env.Env
+	env       db.Env
 	log       *log.LogWriter
-	logfile   env.WritableFile
+	logfile   db.WritableFile
 
 	wmu sync.Mutex
 }
 
 func Open(options *db.Options, dbname string) (db.DB, error) {
+	userCmp := options.Comparator
+	if userCmp == nil {
+		userCmp = util.BytewiseComparator
+	}
+
 	icmp := &InternalKeyComparator{
 		userCmp: options.Comparator,
 	}
 	mem := NewMemTable(icmp)
-	vset := NewVersionSet(dbname)
 	env := env.DefaultEnv()
+	vset := NewVersionSet(dbname, env)
 	snapshots := NewSnapshotList()
 
 	db := &dbImpl{
@@ -51,24 +58,28 @@ func Open(options *db.Options, dbname string) (db.DB, error) {
 	env.CreateDir(dbname)
 
 	maxSequence := int64(0)
-	logName := LogFileName(db.dbname, 77)
+	newLogNumber := db.versions.NewFileNumber()
+	logName := LogFileName(db.dbname, newLogNumber)
 	if env.FileExists(logName) {
 		// recover log
-		f, err := env.NewReadableFile(logName)
+		f, err := env.NewSequentialFile(logName)
 		if err != nil {
 			return nil, err
 		}
 		reader := log.NewLogReader(f)
 		for {
-			record, ok := reader.ReadRecord()
-			if !ok {
-				break
+			record, err := reader.ReadRecord()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				panic("TODO")
 			}
 
 			batch := WriteBatchImpl{
 				rep: record,
 			}
-			err := batch.InsertIntoMemTable(mem)
+			err = batch.InsertIntoMemTable(mem)
 			if err != nil {
 				return nil, err
 			}
@@ -90,6 +101,26 @@ func Open(options *db.Options, dbname string) (db.DB, error) {
 	return db, nil
 }
 
+func (d *dbImpl) Recover() error {
+	d.env.CreateDir(d.dbname)
+
+	// TODO lockfile
+
+	if !d.env.FileExists(CurrentFileName(d.dbname)) {
+		// TODO creaste_if_missing option
+		err := d.NewDB()
+		if err != nil {
+			return err
+		}
+	}
+	// TODO error_if_exists option
+
+	// d.versions.Recover
+}
+
+func (d *dbImpl) NewDB() error {
+}
+
 func (d *dbImpl) Get(key []byte, options *db.ReadOptions) ([]byte, error) {
 	var seq uint64
 	if options != nil && options.Snapshot != nil {
@@ -98,7 +129,10 @@ func (d *dbImpl) Get(key []byte, options *db.ReadOptions) ([]byte, error) {
 		seq = d.versions.GetLastSequence()
 	}
 
-	value, deleted, exist := d.mem.Get(seq, key)
+	var lookupKey LookupKey
+	lookupKey.Set(key, seq)
+
+	value, deleted, exist := d.mem.Get(&lookupKey)
 	if exist {
 		if deleted {
 			return nil, db.ErrNotFound
@@ -195,20 +229,13 @@ func (d *dbImpl) GetSnapshot() db.Snapshot {
 	return d.snapshots.NewSnapshot(seq)
 }
 
-func (d *dbImpl) ReleaseSnapshot(snap db.Snapshot) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	s := snap.(*Snapshot)
-	d.snapshots.ReleaseSnapshot(s)
-}
-
 func (d *dbImpl) Close() error {
 	d.logfile.Sync()
 	d.logfile.Close()
 	return nil
 }
 
-func SetCurrentFile(env env.Env, dbname string, num uint64) error {
+func SetCurrentFile(env db.Env, dbname string, num uint64) error {
 	manifest := DescriptorFileName(dbname, num)
 	contents := strings.TrimPrefix(manifest, dbname)
 

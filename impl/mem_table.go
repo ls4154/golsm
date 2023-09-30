@@ -35,7 +35,7 @@ func (mt *MemTable) Add(seq uint64, valueType ValueType, key, value []byte) {
 	//   tag: (seq << 8) | type
 	internalKey := mt.arena.Allocate(len(key) + 8)
 	copy(internalKey, key)
-	binary.LittleEndian.PutUint64(internalKey[len(key):], (seq<<8)|uint64(valueType))
+	binary.LittleEndian.PutUint64(internalKey[len(key):], PackSequenceAndType(seq, valueType))
 
 	var valueBuf []byte
 	if len(value) > 0 {
@@ -46,23 +46,21 @@ func (mt *MemTable) Add(seq uint64, valueType ValueType, key, value []byte) {
 	mt.list.Insert(internalKey, valueBuf)
 }
 
-func (mt *MemTable) Get(seq uint64, key []byte) (value []byte, deleted, exist bool) {
-	lookupKey := make([]byte, len(key)+8)
-	copy(lookupKey, key)
-	binary.LittleEndian.PutUint64(lookupKey[len(key):], (seq<<8)|uint64(TypeForSeek))
-
+func (mt *MemTable) Get(lookupKey *LookupKey) (value []byte, deleted, exist bool) {
 	iter := mt.list.Iterator()
-	iter.Seek(lookupKey)
+	iter.Seek(lookupKey.Key())
 	if iter.Valid() {
 		ikey := iter.Key()
 		userKey := ikey[:len(ikey)-8]
-		if mt.cmp.userCmp.Compare(userKey, key) == 0 {
+		if mt.cmp.userCmp.Compare(userKey, lookupKey.UserKey()) == 0 {
 			valueType := ValueType(binary.LittleEndian.Uint64(ikey[len(ikey)-8:]) & 0xff)
 			switch valueType {
 			case TypeDeletion:
 				return nil, true, true
 			case TypeValue:
 				return iter.Value(), false, true
+			default:
+				panic("invalid memtable value type")
 			}
 		}
 	}
@@ -108,7 +106,7 @@ func (it *MemTableIterator) SeekToLast() {
 func (it *MemTableIterator) Seek(seq uint64, key []byte) {
 	lookupKey := make([]byte, len(key)+8)
 	copy(lookupKey, key)
-	binary.LittleEndian.PutUint64(lookupKey[len(key):], (seq<<8)|uint64(TypeForSeek))
+	binary.LittleEndian.PutUint64(lookupKey[len(key):], PackSequenceAndType(seq, TypeForSeek))
 	it.listIter.Seek(lookupKey)
 }
 

@@ -2,8 +2,6 @@ package db
 
 import (
 	"errors"
-
-	"github.com/ls4154/golsm/util"
 )
 
 type DB interface {
@@ -13,7 +11,6 @@ type DB interface {
 	Write(batch WriteBatch, options WriteOptions) error
 	NewIterator() (Iterator, error)
 	GetSnapshot() Snapshot
-	ReleaseSnapshot(snap Snapshot)
 	Close() error
 }
 
@@ -30,7 +27,7 @@ type Iterator interface {
 }
 
 type Snapshot interface {
-	Snapshot()
+	Release()
 }
 
 type CompressionType uint8
@@ -72,6 +69,5 @@ func DefaultOptions() *Options {
 		MaxFileSize:     4 * 1024 * 1024,
 		WriteBufferSize: 4 * 1024 * 1024,
 		Compression:     SnappyCompression,
-		Comparator:      util.BytewiseComparator,
 	}
 }

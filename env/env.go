@@ -2,44 +2,12 @@ package env
 
 import (
 	"bufio"
-	"io"
+	"errors"
+	"fmt"
 	"os"
+
+	"github.com/ls4154/golsm/db"
 )
-
-type Env interface {
-	NewReadableFile(name string) (SequentialFile, error)
-	NewRandomAccessFile(name string) (RandomAccessFile, error)
-	NewWritableFile(name string) (WritableFile, error)
-	NewAppendableFile(name string) (WritableFile, error)
-	RemoveFile(name string) error
-	RenameFile(src, target string) error
-	FileExists(name string) bool
-	GetFileSize(name string) (uint64, error)
-
-	GetChildren(path string) ([]string, error)
-	CreateDir(name string) error
-	RemoveDir(name string) error
-
-	LockFile(name string) (*FileLock, error)
-	UnlockFile(lock *FileLock) error
-}
-
-type SequentialFile interface {
-	io.Reader
-	io.Closer
-}
-
-type RandomAccessFile interface {
-	io.ReaderAt
-	io.Closer
-}
-
-type WritableFile interface {
-	io.Writer
-	io.Closer
-	Flush() error
-	Sync() error
-}
 
 const writableFileBufferSize = 64 * 1024 // 64 KB
 
@@ -93,44 +61,44 @@ func DefaultEnv() *GenericEnv {
 	return globalEnv
 }
 
-func (e *GenericEnv) NewReadableFile(name string) (SequentialFile, error) {
+func (e *GenericEnv) NewSequentialFile(name string) (db.SequentialFile, error) {
 	f, err := os.Open(name)
 	if err != nil {
-		return nil, err
+		return nil, osError(err)
 	}
 	return f, nil
 }
 
-func (e *GenericEnv) NewRandomAccessFile(name string) (RandomAccessFile, error) {
+func (e *GenericEnv) NewRandomAccessFile(name string) (db.RandomAccessFile, error) {
 	f, err := os.Open(name)
 	if err != nil {
-		return nil, err
+		return nil, osError(err)
 	}
 	return f, nil
 }
 
-func (e *GenericEnv) NewWritableFile(name string) (WritableFile, error) {
+func (e *GenericEnv) NewWritableFile(name string) (db.WritableFile, error) {
 	f, err := os.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
-		return nil, err
+		return nil, osError(err)
 	}
 	return newBufWritableFile(f), nil
 }
 
-func (e *GenericEnv) NewAppendableFile(name string) (WritableFile, error) {
+func (e *GenericEnv) NewAppendableFile(name string) (db.WritableFile, error) {
 	f, err := os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		return nil, err
+		return nil, osError(err)
 	}
 	return newBufWritableFile(f), nil
 }
 
 func (e *GenericEnv) RemoveFile(name string) error {
-	return os.Remove(name)
+	return osError(os.Remove(name))
 }
 
 func (e *GenericEnv) RenameFile(src, target string) error {
-	return os.Rename(src, target)
+	return osError(os.Rename(src, target))
 }
 
 func (e *GenericEnv) FileExists(name string) bool {
@@ -141,7 +109,7 @@ func (e *GenericEnv) FileExists(name string) bool {
 func (e *GenericEnv) GetFileSize(name string) (uint64, error) {
 	stat, err := os.Stat(name)
 	if err != nil {
-		return 0, err
+		return 0, osError(err)
 	}
 	return uint64(stat.Size()), nil
 }
@@ -149,7 +117,7 @@ func (e *GenericEnv) GetFileSize(name string) (uint64, error) {
 func (e *GenericEnv) GetChildren(path string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, osError(err)
 	}
 	defer f.Close()
 
@@ -166,19 +134,26 @@ func (e *GenericEnv) GetChildren(path string) ([]string, error) {
 }
 
 func (e *GenericEnv) CreateDir(name string) error {
-	return os.Mkdir(name, 0o755)
+	return osError(os.Mkdir(name, 0o755))
 }
 
 func (e *GenericEnv) RemoveDir(name string) error {
-	return os.Remove(name)
+	return osError(os.Remove(name))
 }
 
-func (e *GenericEnv) LockFile(name string) (*FileLock, error) {
+func (e *GenericEnv) LockFile(name string) (db.FileLock, error) {
 	// TODO
 	return &FileLock{}, nil
 }
 
-func (e *GenericEnv) UnlockFile(lock *FileLock) error {
+func (e *GenericEnv) UnlockFile(lock db.FileLock) error {
 	// TODO
 	return nil
+}
+
+func osError(err error) error {
+	if errors.Is(err, os.ErrNotExist) {
+		return db.ErrNotFound
+	}
+	return fmt.Errorf("%w: %s", db.ErrIO, err)
 }

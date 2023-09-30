@@ -2,7 +2,10 @@ package log
 
 import (
 	"errors"
+	"fmt"
 	"io"
+
+	"github.com/ls4154/golsm/db"
 )
 
 type LogReader struct {
@@ -22,7 +25,8 @@ func NewLogReader(src io.Reader) *LogReader {
 	return r
 }
 
-func (r *LogReader) ReadRecord() ([]byte, bool) {
+// TODO scratch
+func (r *LogReader) ReadRecord() ([]byte, error) {
 	var record []byte
 	inFragmentedRecord := false
 	for {
@@ -33,40 +37,34 @@ func (r *LogReader) ReadRecord() ([]byte, bool) {
 		switch recordType {
 		case logRecordFull:
 			if inFragmentedRecord {
-				// TODO courruption
-				panic("corruption")
+				return nil, fmt.Errorf("%w: partial record without end", db.ErrCorruption)
 			}
 			record = fragment
-			return record, true
+			return record, nil
 		case logRecordFirst:
 			if inFragmentedRecord {
-				// TODO courruption
-				panic("corruption")
+				return nil, fmt.Errorf("%w: partial record without end", db.ErrCorruption)
 			}
 			inFragmentedRecord = true
 			record = make([]byte, len(fragment))
 			copy(record, fragment)
 		case logRecordMiddle:
 			if !inFragmentedRecord {
-				// TODO courruption
-				panic("corruption")
+				return nil, fmt.Errorf("%w: missing start of fragmented record", db.ErrCorruption)
 			}
 			record = append(record, fragment...)
 		case logRecordLast:
 			if !inFragmentedRecord {
-				// TODO courruption
-				panic("corruption")
+				return nil, fmt.Errorf("%w: missing start of fragmented record", db.ErrCorruption)
 			}
 			record = append(record, fragment...)
-			return record, true
+			return record, nil
 		case logRecordEof:
-			return nil, false
+			return nil, io.EOF
 		case logRecordBad:
-			// TODO
-			panic("corruption")
+			return nil, fmt.Errorf("%w: error in middle of record", db.ErrCorruption)
 		default:
-			// TODO
-			panic("corruption")
+			return nil, fmt.Errorf("%w: unknown record type %d", db.ErrCorruption, recordType)
 		}
 	}
 }

@@ -144,14 +144,14 @@ func TestSnapshot(t *testing.T) {
 	val, err = ldb.Get(key2, &db.ReadOptions{Snapshot: snap})
 	require.ErrorIs(t, err, db.ErrNotFound)
 
-	ldb.ReleaseSnapshot(snap)
+	snap.Release()
 
 	snap = ldb.GetSnapshot()
 	val, err = ldb.Get(key1, &db.ReadOptions{Snapshot: snap})
 	require.NoError(t, err)
 	require.Equal(t, val2, val)
 
-	ldb.ReleaseSnapshot(snap)
+	snap.Release()
 
 	ldb.Close()
 }
@@ -174,7 +174,7 @@ func TestSnapshotDelete(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, val, readVal)
 
-	ldb.ReleaseSnapshot(snap)
+	snap.Release()
 
 	ldb.Close()
 }

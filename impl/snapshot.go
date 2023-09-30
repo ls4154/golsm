@@ -11,7 +11,12 @@ type Snapshot struct {
 	next *Snapshot
 }
 
-func (s *Snapshot) Snapshot() {}
+func (s *Snapshot) Release() {
+	s.prev.next = s.next
+	s.next.prev = s.prev
+	s.next = nil
+	s.prev = nil
+}
 
 func NewSnapshotList() *SnapshotList {
 	l := &SnapshotList{}
@@ -29,11 +34,4 @@ func (l *SnapshotList) NewSnapshot(seq uint64) *Snapshot {
 	s.prev.next = s
 	s.next.prev = s
 	return s
-}
-
-func (l *SnapshotList) ReleaseSnapshot(s *Snapshot) {
-	s.prev.next = s.next
-	s.next.prev = s.prev
-	s.next = nil
-	s.prev = nil
 }

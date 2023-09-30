@@ -2,6 +2,7 @@ package log
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,13 +28,13 @@ func TestLog(t *testing.T) {
 	reader := NewLogReader(buf)
 
 	for _, r := range records {
-		record, ok := reader.ReadRecord()
-		require.True(t, ok)
+		record, err := reader.ReadRecord()
+		require.NoError(t, err)
 		require.Equal(t, r, record)
 	}
 
-	_, ok := reader.ReadRecord()
-	require.False(t, ok)
+	_, err := reader.ReadRecord()
+	require.ErrorIs(t, err, io.EOF)
 }
 
 func TestLogFragmented(t *testing.T) {
@@ -56,13 +57,13 @@ func TestLogFragmented(t *testing.T) {
 	reader := NewLogReader(buf)
 
 	for _, r := range records {
-		record, ok := reader.ReadRecord()
-		require.True(t, ok)
+		record, err := reader.ReadRecord()
+		require.NoError(t, err)
 		require.Equal(t, r, record)
 	}
 
-	_, ok := reader.ReadRecord()
-	require.False(t, ok)
+	_, err := reader.ReadRecord()
+	require.ErrorIs(t, err, io.EOF)
 }
 
 func repeatedBytes(input []byte, n int) []byte {

@@ -96,7 +96,6 @@ func (it *TwoLevelIterator) initDataBlock() {
 	if err != nil {
 		it.err = err
 		it.dataIter = nil
-		// TODO?
 		return
 	}
 	it.dataIter = iter
