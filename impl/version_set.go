@@ -24,9 +24,78 @@ type Version struct {
 	prev *Version
 }
 
+func (v *Version) Get(lkey *LookupKey) ([]byte, error) {
+	l0files := append([]*FileMetaData{}, v.files[0]...)
+	sort.Slice(l0files, func(i, j int) bool {
+		return l0files[i].number > l0files[j].number
+	})
+
+	// TODO search overlapped table only
+
+	icmp := v.vset.icmp
+
+	done := false
+	deleted := false
+	value := []byte{}
+	var fnErr error
+	handleFn := func(k, v []byte) {
+		parsedKey, err := ParseInternalKey(k)
+		if err != nil {
+			done = true
+			fnErr = err
+			return
+		}
+		if icmp.userCmp.Compare(parsedKey.UserKey, lkey.UserKey()) == 0 {
+			done = true
+			if parsedKey.Type == TypeDeletion {
+				deleted = true
+			} else {
+				value = append(value, v...)
+			}
+		}
+	}
+
+	for _, f := range l0files {
+		err := v.vset.tableCache.Get(f.number, f.size, lkey.Key(), handleFn)
+		if err != nil {
+			return nil, err
+		}
+		if done {
+			if fnErr != nil {
+				return nil, fnErr
+			} else if deleted {
+				return nil, db.ErrNotFound
+			} else {
+				return value, nil
+			}
+		}
+	}
+
+	for lv := 1; lv < NumLevels; lv++ {
+		for _, f := range v.files[lv] {
+			err := v.vset.tableCache.Get(f.number, f.size, lkey.Key(), handleFn)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if done {
+			if fnErr != nil {
+				return nil, fnErr
+			} else if deleted {
+				return nil, db.ErrNotFound
+			} else {
+				return value, nil
+			}
+		}
+	}
+
+	return nil, db.ErrNotFound
+}
+
 type VersionSet struct {
-	dbname string
-	icmp   *InternalKeyComparator
+	dbname     string
+	tableCache *TableCache
+	icmp       *InternalKeyComparator
 
 	nextFileNumber     uint64
 	manifestFileNumber uint64
@@ -128,9 +197,10 @@ func (b *VersionBuilder) MaybeAddFile(v *Version, level int, f *FileMetaData) {
 	v.files[level] = append(v.files[level], f)
 }
 
-func NewVersionSet(dbname string, icmp *InternalKeyComparator, env db.Env) *VersionSet {
+func NewVersionSet(dbname string, icmp *InternalKeyComparator, env db.Env, tableCache *TableCache) *VersionSet {
 	vset := &VersionSet{
 		dbname:             dbname,
+		tableCache:         tableCache,
 		icmp:               icmp,
 		nextFileNumber:     2,
 		manifestFileNumber: 0,
@@ -431,6 +501,10 @@ func (vs *VersionSet) LiveFiles() map[uint64]struct{} {
 	}
 
 	return m
+}
+
+func (vs *VersionSet) NumLevelFiles(level int) int {
+	return len(vs.current.files[level])
 }
 
 func totalFileSize(files []*FileMetaData) uint64 {

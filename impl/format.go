@@ -10,6 +10,8 @@ import (
 const (
 	NumLevels           = 7
 	L0CompactionTrigger = 4
+	L0SlowDownTrigger   = 8
+	L0StopWritesTrigger = 12
 )
 
 type ValueType byte
@@ -92,4 +94,27 @@ func (k LookupKey) Key() []byte {
 
 func (k LookupKey) UserKey() []byte {
 	return k.key[:len(k.key)-8]
+}
+
+type ParsedInternalKey struct {
+	UserKey  []byte
+	Sequence uint64
+	Type     ValueType
+}
+
+func ParseInternalKey(ikey []byte) (*ParsedInternalKey, error) {
+	if len(ikey) < 8 {
+		return nil, db.ErrCorruption
+	}
+
+	userKey := ExtractUserKey(ikey)
+	seqType := binary.LittleEndian.Uint64(ikey[len(userKey):])
+	seq := seqType >> 8
+	t := ValueType(seqType & 0xff)
+
+	return &ParsedInternalKey{
+		UserKey:  userKey,
+		Sequence: seq,
+		Type:     t,
+	}, nil
 }

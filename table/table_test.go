@@ -1,6 +1,7 @@
 package table
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/ls4154/golsm/db"
@@ -10,11 +11,13 @@ import (
 )
 
 func TestTable(t *testing.T) {
-	const numEntries = 100000
-	fname := "555555.ldb"
-
-	writeTable(t, fname, numEntries)
-	readTable(t, fname, numEntries)
+	for _, numEntries := range []int{1, 10, 100, 1000, 10000, 100000} {
+		t.Run(fmt.Sprintf("numEntries=%d", numEntries), func(t *testing.T) {
+			fname := fmt.Sprintf("%06d.ldb", numEntries)
+			writeTable(t, fname, numEntries)
+			readTable(t, fname, numEntries)
+		})
+	}
 }
 
 func writeTable(t *testing.T, name string, numEntries int) {
@@ -32,6 +35,11 @@ func writeTable(t *testing.T, name string, numEntries int) {
 
 	err = builder.Finish()
 	require.NoError(t, err, "failed to finish table")
+
+	builderSize := builder.FileSize()
+	fileSize, err := env.DefaultEnv().GetFileSize(name)
+	require.NoError(t, err, "failed to get file size")
+	require.Equal(t, builderSize, fileSize)
 }
 
 func readTable(t *testing.T, name string, numEntries int) {
@@ -58,8 +66,9 @@ func readTable(t *testing.T, name string, numEntries int) {
 	}
 	require.False(t, it.Valid())
 
-	it.Seek([]byte(getTestKey(100)))
-	for i := 100; i < numEntries; i++ {
+	mid := numEntries / 2
+	it.Seek([]byte(getTestKey(mid)))
+	for i := mid; i < numEntries; i++ {
 		key, value := getTestKeyValue(i)
 
 		require.True(t, it.Valid())
@@ -97,8 +106,8 @@ func readTable(t *testing.T, name string, numEntries int) {
 	}
 	require.False(t, it.Valid())
 
-	it.Seek([]byte(getTestKey(100)))
-	for i := 100; i >= 0; i-- {
+	it.Seek([]byte(getTestKey(mid)))
+	for i := mid; i >= 0; i-- {
 		key, value := getTestKeyValue(i)
 
 		require.True(t, it.Valid())

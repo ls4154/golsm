@@ -205,6 +205,13 @@ func (b *TableBuilder) Finish() error {
 		b.err = fmt.Errorf("write %d < %d", n, len(encoded))
 		return b.err
 	}
+	b.offset += uint64(len(encoded))
+
+	err = b.file.Flush()
+	if err != nil {
+		b.err = err
+		return b.err
+	}
 
 	return nil
 }

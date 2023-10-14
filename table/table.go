@@ -101,3 +101,36 @@ func ReadBlock(f db.RandomAccessFile, handle *BlockHandle) (*Block, error) {
 
 	return result, nil
 }
+
+func (t *Table) InternalGet(key []byte, handleFn func(k, v []byte)) error {
+	indexIter := t.indexBlock.NewBlockIterator(t.cmp)
+
+	indexIter.Seek(key)
+	if indexIter.Valid() {
+		indexValue := indexIter.Value()
+		handle, _, err := DecodeBlockHandle(indexValue)
+		if err != nil {
+			return fmt.Errorf("%w: bad index block handle", db.ErrCorruption)
+		}
+		_ = handle
+		// TODO filter block
+
+		blockIter, err := t.NewBlockIteratorFromIndex(indexValue)
+		if err != nil {
+			return err
+		}
+
+		blockIter.Seek(key)
+		if blockIter.Valid() {
+			handleFn(blockIter.Key(), blockIter.Value())
+		}
+		if blockIter.Error() != nil {
+			return blockIter.Error()
+		}
+	}
+	if indexIter.Error() != nil {
+		return indexIter.Error()
+	}
+
+	return nil
+}

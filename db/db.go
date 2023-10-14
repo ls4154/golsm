@@ -70,6 +70,6 @@ func DefaultOptions() *Options {
 		BlockRestartInterval: 16,
 		MaxFileSize:          4 * 1024 * 1024,
 		WriteBufferSize:      4 * 1024 * 1024,
-		Compression:          SnappyCompression,
+		Compression:          NoCompression,
 	}
 }

@@ -58,7 +58,7 @@ func (mt *MemTable) Get(lookupKey *LookupKey) (value []byte, deleted, exist bool
 			case TypeDeletion:
 				return nil, true, true
 			case TypeValue:
-				return iter.Value(), false, true
+				return append([]byte(nil), iter.Value()...), false, true
 			default:
 				panic("invalid memtable value type")
 			}

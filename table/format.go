@@ -66,6 +66,10 @@ func DecodeFooter(buf []byte) (Footer, int, error) {
 		return Footer{}, 0, fmt.Errorf("%w: footer too short", db.ErrCorruption)
 	}
 
+	if binary.LittleEndian.Uint64(buf[len(buf)-8:]) != MagicNumber {
+		return Footer{}, 0, fmt.Errorf("%w: magic number mismatch", db.ErrCorruption)
+	}
+
 	metaindexHandle, n1, err := DecodeBlockHandle(buf)
 	if err != nil {
 		return Footer{}, 0, err
