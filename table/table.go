@@ -6,18 +6,17 @@ import (
 	"fmt"
 
 	"github.com/ls4154/golsm/db"
-	"github.com/ls4154/golsm/env"
 	"github.com/ls4154/golsm/util"
 )
 
 type Table struct {
-	file env.RandomAccessFile
+	file db.RandomAccessFile
 	cmp  db.Comparator
 
 	indexBlock *Block
 }
 
-func OpenTable(file env.RandomAccessFile, size uint64, cmp db.Comparator) (*Table, error) {
+func OpenTable(file db.RandomAccessFile, size uint64, cmp db.Comparator) (*Table, error) {
 	// Footer
 	var buf [FooterLength]byte
 	n, err := file.ReadAt(buf[:], int64(size)-FooterLength)
@@ -65,7 +64,7 @@ func (t *Table) NewBlockIteratorFromIndex(indexValue []byte) (db.Iterator, error
 	return block.NewBlockIterator(t.cmp), nil
 }
 
-func ReadBlock(f env.RandomAccessFile, handle *BlockHandle) (*Block, error) {
+func ReadBlock(f db.RandomAccessFile, handle *BlockHandle) (*Block, error) {
 	buf := make([]byte, handle.Size+BlockTrailerSize)
 	rd, err := f.ReadAt(buf, int64(handle.Offset))
 	if err != nil {

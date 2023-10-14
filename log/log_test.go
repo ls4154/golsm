@@ -18,14 +18,14 @@ func TestLog(t *testing.T) {
 		[]byte(""),
 	}
 
-	writer := NewLogWriter(buf)
+	writer := NewWriter(buf)
 
 	for _, r := range records {
 		err := writer.AddRecord(r)
 		require.NoError(t, err)
 	}
 
-	reader := NewLogReader(buf)
+	reader := NewReader(buf)
 
 	for _, r := range records {
 		record, err := reader.ReadRecord()
@@ -47,14 +47,14 @@ func TestLogFragmented(t *testing.T) {
 	records[2] = repeatedBytes([]byte("xxxxxx"), 10000)
 	records[3] = repeatedBytes([]byte("0123456789"), 10000)
 
-	writer := NewLogWriter(buf)
+	writer := NewWriter(buf)
 
 	for _, r := range records {
 		err := writer.AddRecord(r)
 		require.NoError(t, err)
 	}
 
-	reader := NewLogReader(buf)
+	reader := NewReader(buf)
 
 	for _, r := range records {
 		record, err := reader.ReadRecord()

@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/ls4154/golsm/db"
-	"github.com/ls4154/golsm/env"
 	"github.com/ls4154/golsm/util"
 )
 
@@ -15,7 +14,7 @@ type TableBuilder struct {
 	compression     db.CompressionType
 	restartInterval int
 
-	file   env.WritableFile
+	file   db.WritableFile
 	offset uint64
 
 	block         *BlockBuilder
@@ -31,7 +30,7 @@ type TableBuilder struct {
 	closed bool
 }
 
-func NewTableBuilder(file env.WritableFile, cmp db.Comparator, blockSize int, compression db.CompressionType,
+func NewTableBuilder(file db.WritableFile, cmp db.Comparator, blockSize int, compression db.CompressionType,
 	restartInterval int,
 ) *TableBuilder {
 	return &TableBuilder{

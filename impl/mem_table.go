@@ -103,11 +103,8 @@ func (it *MemTableIterator) SeekToLast() {
 	it.listIter.SeekToLast()
 }
 
-func (it *MemTableIterator) Seek(seq uint64, key []byte) {
-	lookupKey := make([]byte, len(key)+8)
-	copy(lookupKey, key)
-	binary.LittleEndian.PutUint64(lookupKey[len(key):], PackSequenceAndType(seq, TypeForSeek))
-	it.listIter.Seek(lookupKey)
+func (it *MemTableIterator) Seek(key []byte) {
+	it.listIter.Seek(key)
 }
 
 func (it *MemTableIterator) Key() []byte {
@@ -116,4 +113,8 @@ func (it *MemTableIterator) Key() []byte {
 
 func (it *MemTableIterator) Value() []byte {
 	return it.listIter.Value()
+}
+
+func (it *MemTableIterator) Error() error {
+	return nil
 }

@@ -2,7 +2,9 @@ package impl
 
 import (
 	"errors"
+	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 
@@ -13,17 +15,19 @@ import (
 )
 
 type dbImpl struct {
-	dbname    string
-	options   db.Options
-	icmp      *InternalKeyComparator
-	versions  *VersionSet
-	snapshots *SnapshotList
-	mem       *MemTable
-	imm       *MemTable
-	mu        sync.Mutex
-	env       db.Env
-	log       *log.LogWriter
-	logfile   db.WritableFile
+	dbname         string
+	options        db.Options
+	icmp           *InternalKeyComparator
+	versions       *VersionSet
+	snapshots      *SnapshotList
+	pendingOutputs map[uint64]struct{}
+	mem            *MemTable
+	imm            *MemTable
+	mu             sync.Mutex
+	env            db.Env
+	log            *log.Writer
+	logfile        db.WritableFile
+	logfileNum     uint64
 
 	wmu sync.Mutex
 }
@@ -35,90 +39,270 @@ func Open(options *db.Options, dbname string) (db.DB, error) {
 	}
 
 	icmp := &InternalKeyComparator{
-		userCmp: options.Comparator,
+		userCmp: userCmp,
 	}
-	mem := NewMemTable(icmp)
 	env := env.DefaultEnv()
-	vset := NewVersionSet(dbname, env)
+	vset := NewVersionSet(dbname, icmp, env)
 	snapshots := NewSnapshotList()
 
 	db := &dbImpl{
-		dbname:    dbname,
-		options:   *options,
-		icmp:      icmp,
-		versions:  vset,
-		snapshots: snapshots,
-		mem:       mem,
-		env:       env,
+		dbname:         dbname,
+		options:        *options,
+		icmp:           icmp,
+		versions:       vset,
+		snapshots:      snapshots,
+		pendingOutputs: make(map[uint64]struct{}),
+		mem:            nil,
+		env:            env,
 	}
 
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
-	env.CreateDir(dbname)
-
-	maxSequence := int64(0)
-	newLogNumber := db.versions.NewFileNumber()
-	logName := LogFileName(db.dbname, newLogNumber)
-	if env.FileExists(logName) {
-		// recover log
-		f, err := env.NewSequentialFile(logName)
-		if err != nil {
-			return nil, err
-		}
-		reader := log.NewLogReader(f)
-		for {
-			record, err := reader.ReadRecord()
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					break
-				}
-				panic("TODO")
-			}
-
-			batch := WriteBatchImpl{
-				rep: record,
-			}
-			err = batch.InsertIntoMemTable(mem)
-			if err != nil {
-				return nil, err
-			}
-			lastSeq := batch.sequence() + uint64(batch.count()) - 1
-			if lastSeq > uint64(maxSequence) {
-				maxSequence = int64(lastSeq)
-			}
-		}
-	}
-	vset.SetLastSequence(uint64(maxSequence))
-
-	f, err := env.NewAppendableFile(logName)
+	edit := VersionEdit{}
+	err := db.recover(&edit)
 	if err != nil {
 		return nil, err
 	}
-	db.log = log.NewLogWriter(f)
-	db.logfile = f
+
+	if db.mem == nil {
+		newLogNumber := db.versions.NewFileNumber()
+		fname := TableFileName(db.dbname, newLogNumber)
+		f, err := db.env.NewWritableFile(fname)
+		if err != nil {
+			return nil, err
+		}
+		edit.SetLogNumber(newLogNumber)
+		db.logfile = f
+		db.logfileNum = newLogNumber
+		db.log = log.NewWriter(f)
+		db.mem = NewMemTable(db.icmp)
+	}
+
+	edit.SetPrevLogNumber(0)
+	edit.SetLogNumber(db.logfileNum)
+	err = db.versions.LogAndApply(&edit, &db.mu)
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO remove obsolete files
+	// TODO maybe sched comp
 
 	return db, nil
 }
 
-func (d *dbImpl) Recover() error {
+func (d *dbImpl) recover(edit *VersionEdit) error {
+	util.AssertMutexHeld(&d.mu)
+
 	d.env.CreateDir(d.dbname)
 
 	// TODO lockfile
 
 	if !d.env.FileExists(CurrentFileName(d.dbname)) {
 		// TODO creaste_if_missing option
-		err := d.NewDB()
+		err := d.newDB()
 		if err != nil {
 			return err
 		}
 	}
 	// TODO error_if_exists option
 
-	// d.versions.Recover
+	err := d.versions.Recover()
+	if err != nil {
+		return err
+	}
+
+	maxSequence := uint64(0)
+
+	minLog := d.versions.logNumber
+	prevLog := d.versions.prevLogNumber
+
+	filenames, err := d.env.GetChildren(d.dbname)
+	if err != nil {
+		return err
+	}
+
+	expected := d.versions.LiveFiles()
+	logs := []uint64{}
+
+	for _, fname := range filenames {
+		if ftype, num, ok := ParseFileName(fname); ok {
+			delete(expected, num)
+			if ftype == FileTypeLog && ((num >= minLog) || (num == prevLog)) {
+				logs = append(logs, num)
+			}
+		}
+	}
+
+	if len(expected) > 0 {
+		return fmt.Errorf("%w: %d missing files", db.ErrCorruption, len(expected))
+	}
+
+	sort.Slice(logs, func(i, j int) bool {
+		return logs[i] < logs[j]
+	})
+
+	for i, logNum := range logs {
+		err := d.RecoverLogFile(logNum, i == len(logs)-1, edit, &maxSequence)
+		if err != nil {
+			return err
+		}
+
+		d.versions.MakeFileNumberUsed(logNum)
+	}
+
+	if d.versions.GetLastSequence() < maxSequence {
+		d.versions.SetLastSequence(maxSequence)
+	}
+
+	return nil
 }
 
-func (d *dbImpl) NewDB() error {
+func (d *dbImpl) RecoverLogFile(logNum uint64, last bool, edit *VersionEdit, maxSeq *uint64) error {
+	util.AssertMutexHeld(&d.mu)
+
+	fname := LogFileName(d.dbname, logNum)
+	f, err := d.env.NewSequentialFile(fname)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	reader := log.NewReader(f)
+	compactions := 0
+	var mem *MemTable
+	var recoverErr error
+	// TODO ignore corruption option
+	for {
+		record, err := reader.ReadRecord()
+		if errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			recoverErr = err
+			break
+		}
+
+		if len(record) < 12 {
+			recoverErr = fmt.Errorf("%w: log record too small", db.ErrCorruption)
+			break
+		}
+
+		batch := WriteBatchFromContents(record)
+
+		if mem == nil {
+			mem = NewMemTable(d.icmp)
+		}
+		err = batch.InsertIntoMemTable(mem)
+		if err != nil {
+			recoverErr = err
+			break
+		}
+
+		lastSeq := batch.sequence() + uint64(batch.count()) - 1
+		if lastSeq > *maxSeq {
+			*maxSeq = lastSeq
+		}
+
+		if mem.ApproximateMemoryUsage() > d.options.WriteBufferSize {
+			compactions++
+			err := d.WriteLevel0Table(mem, edit)
+			mem = nil
+			if err != nil {
+				recoverErr = err
+				break
+			}
+		}
+	}
+
+	if recoverErr != nil {
+		return recoverErr
+	}
+
+	// TODO reuse log
+
+	if mem != nil {
+		err := d.WriteLevel0Table(mem, edit)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (d *dbImpl) newDB() error {
+	edit := VersionEdit{}
+	edit.SetComparator(d.icmp.userCmp.Name())
+	edit.SetLogNumber(0)
+	edit.SetNextFileNumber(2)
+	edit.SetLastSequence(0)
+
+	manifest := DescriptorFileName(d.dbname, 1)
+	f, err := d.env.NewWritableFile(manifest)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if f != nil {
+			f.Close()
+		}
+		if err != nil {
+			d.env.RemoveFile(manifest)
+		}
+	}()
+
+	writer := log.NewWriter(f)
+	record := edit.Append(nil)
+	err = writer.AddRecord(record)
+	if err != nil {
+		return err
+	}
+
+	err = f.Sync()
+	if err != nil {
+		return err
+	}
+	err = f.Close()
+	if err != nil {
+		return err
+	}
+	f = nil
+
+	return SetCurrentFile(d.env, d.dbname, 1)
+}
+
+func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit) error {
+	util.AssertMutexHeld(&d.mu)
+
+	// TODO stats
+
+	meta := FileMetaData{
+		number: d.versions.NewFileNumber(),
+	}
+	d.pendingOutputs[meta.number] = struct{}{}
+
+	iter := mem.Iterator()
+	// TODO defer iter.Close()
+
+	d.mu.Unlock()
+	err := BuildTable(d.dbname, d.env, iter, d.icmp, &d.options, &meta)
+	d.mu.Lock()
+
+	if err != nil {
+		return err
+	}
+
+	if meta.size <= 0 {
+		return nil
+	}
+
+	level := 0
+	// TODO pick level
+	edit.AddFile(level, meta.number, meta.size, meta.smallest, meta.largest)
+
+	return nil
 }
 
 func (d *dbImpl) Get(key []byte, options *db.ReadOptions) ([]byte, error) {
@@ -209,7 +393,7 @@ func (d *dbImpl) makeRoomForWrite() error {
 			}
 
 			d.logfile = f
-			d.log = log.NewLogWriter(f)
+			d.log = log.NewWriter(f)
 
 			d.imm = d.mem
 			d.mem = NewMemTable(d.icmp)

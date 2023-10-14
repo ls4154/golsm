@@ -38,11 +38,12 @@ const (
 )
 
 type Options struct {
-	BlockSize       int
-	MaxFileSize     int
-	WriteBufferSize int
-	Compression     CompressionType
-	Comparator      Comparator
+	BlockSize            int
+	BlockRestartInterval int
+	MaxFileSize          int
+	WriteBufferSize      int
+	Compression          CompressionType
+	Comparator           Comparator
 }
 
 type ReadOptions struct {
@@ -65,9 +66,10 @@ var (
 
 func DefaultOptions() *Options {
 	return &Options{
-		BlockSize:       4 * 1024,
-		MaxFileSize:     4 * 1024 * 1024,
-		WriteBufferSize: 4 * 1024 * 1024,
-		Compression:     SnappyCompression,
+		BlockSize:            4 * 1024,
+		BlockRestartInterval: 16,
+		MaxFileSize:          4 * 1024 * 1024,
+		WriteBufferSize:      4 * 1024 * 1024,
+		Compression:          SnappyCompression,
 	}
 }

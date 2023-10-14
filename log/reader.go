@@ -8,7 +8,7 @@ import (
 	"github.com/ls4154/golsm/db"
 )
 
-type LogReader struct {
+type Reader struct {
 	src          io.Reader
 	backingStore [logBlockSize]byte
 	buf          []byte
@@ -16,8 +16,8 @@ type LogReader struct {
 	eof          bool
 }
 
-func NewLogReader(src io.Reader) *LogReader {
-	r := &LogReader{
+func NewReader(src io.Reader) *Reader {
+	r := &Reader{
 		src:    src,
 		offset: 0,
 	}
@@ -26,7 +26,7 @@ func NewLogReader(src io.Reader) *LogReader {
 }
 
 // TODO scratch
-func (r *LogReader) ReadRecord() ([]byte, error) {
+func (r *Reader) ReadRecord() ([]byte, error) {
 	var record []byte
 	inFragmentedRecord := false
 	for {
@@ -69,7 +69,7 @@ func (r *LogReader) ReadRecord() ([]byte, error) {
 	}
 }
 
-func (r *LogReader) readPhysicalRecord() ([]byte, logRecordType) {
+func (r *Reader) readPhysicalRecord() ([]byte, logRecordType) {
 	for {
 		if len(r.buf) < logHeaderSize {
 			if !r.eof {

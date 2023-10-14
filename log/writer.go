@@ -6,13 +6,13 @@ import (
 	"github.com/ls4154/golsm/util"
 )
 
-type LogWriter struct {
+type Writer struct {
 	dest        io.Writer
 	blockOffset int
 }
 
-func NewLogWriter(dest io.Writer) *LogWriter {
-	w := &LogWriter{
+func NewWriter(dest io.Writer) *Writer {
+	w := &Writer{
 		dest:        dest,
 		blockOffset: 0,
 	}
@@ -21,7 +21,7 @@ func NewLogWriter(dest io.Writer) *LogWriter {
 
 var zeroArray [logHeaderSize]byte
 
-func (w *LogWriter) AddRecord(data []byte) error {
+func (w *Writer) AddRecord(data []byte) error {
 	left := len(data)
 	off := 0
 	begin := true
@@ -65,7 +65,7 @@ func (w *LogWriter) AddRecord(data []byte) error {
 	return nil
 }
 
-func (w *LogWriter) emitPhysicalRecord(t logRecordType, data []byte) error {
+func (w *Writer) emitPhysicalRecord(t logRecordType, data []byte) error {
 	util.Assert(w.blockOffset+logHeaderSize+len(data) <= logBlockSize)
 
 	length := len(data)

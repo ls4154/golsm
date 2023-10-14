@@ -31,6 +31,12 @@ func NewWriteBatch() *WriteBatchImpl {
 	}
 }
 
+func WriteBatchFromContents(c []byte) *WriteBatchImpl {
+	return &WriteBatchImpl{
+		rep: c,
+	}
+}
+
 func (b *WriteBatchImpl) sequence() uint64 {
 	return binary.LittleEndian.Uint64(b.rep[0:8])
 }

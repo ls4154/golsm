@@ -8,7 +8,7 @@ type internalIterator interface {
 	Prev()
 	SeekToFirst()
 	SeekToLast()
-	Seek(seq uint64, key []byte)
+	Seek(key []byte)
 	Key() []byte
 	Value() []byte
 }

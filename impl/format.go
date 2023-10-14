@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	NumLevels = 7
-	L0CompactionTrigger
+	NumLevels           = 7
+	L0CompactionTrigger = 4
 )
 
 type ValueType byte

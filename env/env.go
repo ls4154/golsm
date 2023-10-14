@@ -152,6 +152,9 @@ func (e *GenericEnv) UnlockFile(lock db.FileLock) error {
 }
 
 func osError(err error) error {
+	if err == nil {
+		return nil
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		return db.ErrNotFound
 	}
