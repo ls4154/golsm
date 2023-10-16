@@ -46,6 +46,16 @@ type Options struct {
 	Comparator           Comparator
 }
 
+func DefaultOptions() *Options {
+	return &Options{
+		BlockSize:            4 * 1024,
+		BlockRestartInterval: 16,
+		MaxFileSize:          4 * 1024 * 1024,
+		WriteBufferSize:      4 * 1024 * 1024,
+		Compression:          NoCompression,
+	}
+}
+
 type ReadOptions struct {
 	VerifyChecksum bool
 	BypassCache    bool
@@ -63,13 +73,3 @@ var (
 	ErrInvalidArgument = errors.New("invalid argument")
 	ErrIO              = errors.New("io error")
 )
-
-func DefaultOptions() *Options {
-	return &Options{
-		BlockSize:            4 * 1024,
-		BlockRestartInterval: 16,
-		MaxFileSize:          4 * 1024 * 1024,
-		WriteBufferSize:      4 * 1024 * 1024,
-		Compression:          NoCompression,
-	}
-}

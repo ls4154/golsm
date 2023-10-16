@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/ls4154/golsm/db"
-	"github.com/ls4154/golsm/env"
 	"github.com/ls4154/golsm/log"
 	"github.com/ls4154/golsm/util"
 )
@@ -46,7 +45,7 @@ func Open(options *db.Options, dbname string) (db.DB, error) {
 	icmp := &InternalKeyComparator{
 		userCmp: userCmp,
 	}
-	env := env.DefaultEnv()
+	env := util.DefaultEnv()
 	tcache := NewTableCache(dbname, opt, env, icmp)
 	vset := NewVersionSet(dbname, icmp, env, tcache)
 	snapshots := NewSnapshotList()

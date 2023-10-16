@@ -5,23 +5,23 @@ import (
 	"testing"
 
 	"github.com/ls4154/golsm/db"
-	"github.com/ls4154/golsm/env"
 	"github.com/ls4154/golsm/util"
 	"github.com/stretchr/testify/require"
 )
 
 func TestTable(t *testing.T) {
+	env := util.DefaultEnv()
 	for _, numEntries := range []int{1, 10, 100, 1000, 10000, 100000} {
 		t.Run(fmt.Sprintf("numEntries=%d", numEntries), func(t *testing.T) {
 			fname := fmt.Sprintf("%06d.ldb", numEntries)
-			writeTable(t, fname, numEntries)
-			readTable(t, fname, numEntries)
+			writeTable(t, env, fname, numEntries)
+			readTable(t, env, fname, numEntries)
 		})
 	}
 }
 
-func writeTable(t *testing.T, name string, numEntries int) {
-	file, err := env.DefaultEnv().NewWritableFile(name)
+func writeTable(t *testing.T, env db.Env, name string, numEntries int) {
+	file, err := env.NewWritableFile(name)
 	require.NoError(t, err, "failed to open file")
 	defer file.Close()
 
@@ -37,17 +37,17 @@ func writeTable(t *testing.T, name string, numEntries int) {
 	require.NoError(t, err, "failed to finish table")
 
 	builderSize := builder.FileSize()
-	fileSize, err := env.DefaultEnv().GetFileSize(name)
+	fileSize, err := env.GetFileSize(name)
 	require.NoError(t, err, "failed to get file size")
 	require.Equal(t, builderSize, fileSize)
 }
 
-func readTable(t *testing.T, name string, numEntries int) {
-	file, err := env.DefaultEnv().NewRandomAccessFile(name)
+func readTable(t *testing.T, env db.Env, name string, numEntries int) {
+	file, err := env.NewRandomAccessFile(name)
 	require.NoError(t, err, "failed to open file")
 	defer file.Close()
 
-	size, err := env.DefaultEnv().GetFileSize(name)
+	size, err := env.GetFileSize(name)
 	require.NoError(t, err, "failed to get file size")
 
 	tbl, err := OpenTable(file, size, util.BytewiseComparator)
