@@ -389,7 +389,7 @@ func (vs *VersionSet) Recover() error {
 	}
 
 	if !havePrevLogNumber {
-		logNumber = 0
+		prevLogNumber = 0
 	}
 
 	vs.MakeFileNumberUsed(prevLogNumber)

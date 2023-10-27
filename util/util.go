@@ -63,6 +63,9 @@ func GetLengthPrefixedBytes(input []byte) ([]byte, int) {
 	if n <= 0 {
 		return nil, 0
 	}
+	if len(input)-n < int(length) {
+		return nil, 0
+	}
 	return input[n : n+int(length)], n + int(length)
 }
 

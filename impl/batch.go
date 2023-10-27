@@ -37,6 +37,13 @@ func WriteBatchFromContents(c []byte) *WriteBatchImpl {
 	}
 }
 
+func (b *WriteBatchImpl) clear() {
+	b.rep = b.rep[:writeBatchHeaderSize]
+	for i := 0; i < writeBatchHeaderSize; i++ {
+		b.rep[i] = 0
+	}
+}
+
 func (b *WriteBatchImpl) sequence() uint64 {
 	return binary.LittleEndian.Uint64(b.rep[0:8])
 }
@@ -55,6 +62,15 @@ func (b *WriteBatchImpl) setCount(seq uint32) {
 
 func (b *WriteBatchImpl) contents() []byte {
 	return b.rep
+}
+
+func (b *WriteBatchImpl) Size() int {
+	return len(b.rep)
+}
+
+func (b *WriteBatchImpl) Append(src *WriteBatchImpl) {
+	b.setCount(b.count() + src.count())
+	b.rep = append(b.rep, src.rep[writeBatchHeaderSize:]...)
 }
 
 func (b *WriteBatchImpl) Put(key, value []byte) {

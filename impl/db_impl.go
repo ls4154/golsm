@@ -25,13 +25,12 @@ type dbImpl struct {
 	mem            *MemTable
 	imm            *MemTable
 	mu             sync.Mutex
-	bgWorkDone     *sync.Cond
 	env            db.Env
 	log            *log.Writer
 	logfile        db.WritableFile
 	logfileNum     uint64
 
-	wmu sync.Mutex
+	writeSerializer *writeSerializer
 }
 
 func Open(options *db.Options, dbname string) (db.DB, error) {
@@ -62,7 +61,8 @@ func Open(options *db.Options, dbname string) (db.DB, error) {
 		env:            env,
 	}
 
-	db.bgWorkDone = sync.NewCond(&db.mu)
+	db.writeSerializer = NewWriteSerializer(db.applyBatch)
+	db.writeSerializer.Run()
 
 	db.mu.Lock()
 	defer db.mu.Unlock()
@@ -383,37 +383,10 @@ func (d *dbImpl) Delete(key []byte, options db.WriteOptions) error {
 }
 
 func (d *dbImpl) Write(updates db.WriteBatch, options db.WriteOptions) error {
-	d.wmu.Lock()
-	defer d.wmu.Unlock()
-
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	err := d.makeRoomForWrite(updates == nil)
-	if err != nil {
-		return err
+	if updates == nil {
+		return nil
 	}
-
-	lastSeq := d.versions.GetLastSequence()
-	batch := updates.(*WriteBatchImpl)
-	batch.setSequence(lastSeq + 1)
-
-	d.mu.Unlock()
-	err = d.log.AddRecord(batch.contents())
-	if err == nil && options.Sync {
-		err := d.logfile.Sync()
-		// TODO sync error
-		_ = err
-	}
-
-	if err == nil {
-		err = batch.InsertIntoMemTable(d.mem)
-	}
-	d.mu.Lock()
-
-	d.versions.SetLastSequence(lastSeq + uint64(batch.count()))
-
-	return err
+	return d.writeSerializer.Write(updates, options)
 }
 
 func (d *dbImpl) MaybeScheduleCompaction() {
@@ -434,9 +407,9 @@ func (d *dbImpl) makeRoomForWrite(force bool) error {
 			// ok
 			break
 		} else if d.imm != nil {
-			d.bgWorkDone.Wait()
+			// TODO wait
 		} else if d.versions.NumLevelFiles(0) >= L0StopWritesTrigger {
-			d.bgWorkDone.Wait()
+			// TODO wait
 		} else {
 			// switch to a new log file and memtable
 			logNum := d.versions.NewFileNumber()
@@ -475,8 +448,10 @@ func (d *dbImpl) GetSnapshot() db.Snapshot {
 }
 
 func (d *dbImpl) Close() error {
-	d.logfile.Sync()
-	d.logfile.Close()
+	d.writeSerializer.Close()
+
+	_ = d.logfile.Sync()
+	_ = d.logfile.Close()
 	return nil
 }
 
