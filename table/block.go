@@ -127,6 +127,16 @@ func (it *BlockIterator) parseNextEntry() bool {
 	it.curLength = read + int(nonShared) + int(valueLen)
 	b = b[read:]
 
+	if int(shared) > len(it.key) {
+		it.courrptionError(ErrInvalidEntry)
+		return false
+	}
+
+	if int(nonShared+valueLen) > len(b) {
+		it.courrptionError(ErrInvalidEntry)
+		return false
+	}
+
 	it.key = it.key[:shared]
 	it.key = append(it.key, b[:nonShared]...)
 	it.value = b[nonShared : nonShared+valueLen]
@@ -152,27 +162,32 @@ func decodeBlockEntryLength(b []byte) (uint32, uint32, uint32, int, error) {
 		return shared, nonShared, valueLen, 3, nil
 	}
 
+	readTotal := 0
+
 	vint, read := binary.Uvarint(b)
 	if read <= 0 {
 		return 0, 0, 0, 0, ErrInvalidEntry
 	}
 	shared = uint32(vint)
 	b = b[read:]
+	readTotal += read
 
 	vint, read = binary.Uvarint(b)
-	if read < 0 {
+	if read <= 0 {
 		return 0, 0, 0, 0, ErrInvalidEntry
 	}
 	nonShared = uint32(vint)
 	b = b[read:]
+	readTotal += read
 
 	vint, read = binary.Uvarint(b)
-	if read < 0 {
+	if read <= 0 {
 		return 0, 0, 0, 0, ErrInvalidEntry
 	}
 	valueLen = uint32(vint)
+	readTotal += read
 
-	return shared, nonShared, valueLen, 0, nil
+	return shared, nonShared, valueLen, readTotal, nil
 }
 
 func (it *BlockIterator) SeekToFirst() {

@@ -37,7 +37,7 @@ const align = 8
 
 func (a *Arena) AllocateAligned(bytes int) []byte {
 	padSize := 0
-	if mod := a.allocPos % align; align != 0 {
+	if mod := a.allocPos % align; mod != 0 {
 		padSize = align - mod
 	}
 

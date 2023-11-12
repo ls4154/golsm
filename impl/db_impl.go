@@ -4,10 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	stdlog "log"
+	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/ls4154/golsm/db"
 	"github.com/ls4154/golsm/log"
@@ -31,6 +31,9 @@ type dbImpl struct {
 	logfileNum     uint64
 
 	writeSerializer *writeSerializer
+	bgWork          *bgWork
+
+	logger db.Logger
 }
 
 func Open(options *db.Options, dbname string) (db.DB, error) {
@@ -59,10 +62,15 @@ func Open(options *db.Options, dbname string) (db.DB, error) {
 		pendingOutputs: make(map[uint64]struct{}),
 		mem:            nil,
 		env:            env,
+
+		logger: stdlog.Default(),
 	}
 
-	db.writeSerializer = NewWriteSerializer(db.applyBatch)
+	db.writeSerializer = db.newWriteSerializer()
 	db.writeSerializer.Run()
+
+	db.bgWork = db.newBgWork()
+	db.bgWork.Run()
 
 	db.mu.Lock()
 	defer db.mu.Unlock()
@@ -103,12 +111,15 @@ func Open(options *db.Options, dbname string) (db.DB, error) {
 func (d *dbImpl) recover(edit *VersionEdit) error {
 	util.AssertMutexHeld(&d.mu)
 
+	d.logger.Printf("recovering...")
+
 	d.env.CreateDir(d.dbname)
 
 	// TODO lockfile
 
 	if !d.env.FileExists(CurrentFileName(d.dbname)) {
 		// TODO creaste_if_missing option
+		d.logger.Printf("Creating DB %s", d.dbname)
 		err := d.newDB()
 		if err != nil {
 			return err
@@ -169,6 +180,8 @@ func (d *dbImpl) recover(edit *VersionEdit) error {
 
 func (d *dbImpl) RecoverLogFile(logNum uint64, last bool, edit *VersionEdit, maxSeq *uint64) error {
 	util.AssertMutexHeld(&d.mu)
+
+	d.logger.Printf("recovering log %d", logNum)
 
 	fname := LogFileName(d.dbname, logNum)
 	f, err := d.env.NewSequentialFile(fname)
@@ -294,9 +307,14 @@ func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit) error {
 	iter := mem.Iterator()
 	// TODO defer iter.Close()
 
+	d.logger.Printf("Level-0 table #%d: started", meta.number)
+
 	d.mu.Unlock()
 	err := BuildTable(d.dbname, d.env, iter, d.icmp, d.options, &meta)
 	d.mu.Lock()
+
+	d.logger.Printf("Level-0 table #%d: %d bytes %s", meta.number, meta.size, err)
+	delete(d.pendingOutputs, meta.number)
 
 	if err != nil {
 		return err
@@ -307,7 +325,9 @@ func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit) error {
 	}
 
 	level := 0
+
 	// TODO pick level
+
 	edit.AddFile(level, meta.number, meta.size, meta.smallest, meta.largest)
 
 	return nil
@@ -315,7 +335,6 @@ func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit) error {
 
 func (d *dbImpl) Get(key []byte, options *db.ReadOptions) ([]byte, error) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	var seq uint64
 	if options != nil && options.Snapshot != nil {
@@ -327,41 +346,29 @@ func (d *dbImpl) Get(key []byte, options *db.ReadOptions) ([]byte, error) {
 	mem := d.mem
 	imm := d.imm
 	current := d.versions.current
+	d.mu.Unlock()
 
-	var value []byte
-	var deleted, found bool
-	var err error
-	{
-		d.mu.Unlock()
+	var lookupKey LookupKey
+	lookupKey.Set(key, seq)
 
-		var lookupKey LookupKey
-		lookupKey.Set(key, seq)
-
-		value, deleted, found = mem.Get(&lookupKey)
-		if !found && imm != nil {
-			value, deleted, found = imm.Get(&lookupKey)
+	value, deleted, found := mem.Get(&lookupKey)
+	if !found && imm != nil {
+		value, deleted, found = imm.Get(&lookupKey)
+	}
+	if !found {
+		var getErr error
+		value, getErr = current.Get(&lookupKey)
+		if errors.Is(getErr, db.ErrNotFound) {
+			found = false
+		} else if getErr != nil {
+			return nil, getErr
+		} else {
+			found = true
+			deleted = false
 		}
-		if !found {
-			var getErr error
-			value, getErr = current.Get(&lookupKey)
-			if errors.Is(getErr, db.ErrNotFound) {
-				found = false
-			} else if getErr != nil {
-				err = getErr
-			} else {
-				found = true
-				deleted = false
-			}
-		}
-
-		d.mu.Lock()
 	}
 
-	// TODO sched compaction
-
-	if err != nil {
-		return nil, err
-	}
+	// TODO seek compaction?
 
 	if !found || deleted {
 		return nil, db.ErrNotFound
@@ -389,55 +396,6 @@ func (d *dbImpl) Write(updates db.WriteBatch, options db.WriteOptions) error {
 	return d.writeSerializer.Write(updates, options)
 }
 
-func (d *dbImpl) MaybeScheduleCompaction() {
-}
-
-func (d *dbImpl) makeRoomForWrite(force bool) error {
-	util.AssertMutexHeld(&d.mu)
-
-	allowDelay := !force
-	for {
-		// TODO bg error
-		if allowDelay && d.versions.NumLevelFiles(0) >= L0SlowDownTrigger {
-			d.mu.Unlock()
-			time.Sleep(time.Millisecond)
-			allowDelay = false // sleep only once
-			d.mu.Lock()
-		} else if !force && d.mem.ApproximateMemoryUsage() <= d.options.WriteBufferSize {
-			// ok
-			break
-		} else if d.imm != nil {
-			// TODO wait
-		} else if d.versions.NumLevelFiles(0) >= L0StopWritesTrigger {
-			// TODO wait
-		} else {
-			// switch to a new log file and memtable
-			logNum := d.versions.NewFileNumber()
-			f, err := d.env.NewWritableFile(LogFileName(d.dbname, logNum))
-			if err != nil {
-				// TODO
-				return err
-			}
-
-			err = d.logfile.Close()
-			if err != nil {
-				// TODO bg err
-			}
-
-			d.logfile = f
-			d.logfileNum = logNum
-			d.log = log.NewWriter(f)
-
-			d.imm = d.mem
-			d.mem = NewMemTable(d.icmp)
-
-			force = false
-			d.MaybeScheduleCompaction()
-		}
-	}
-	return nil
-}
-
 func (d *dbImpl) NewIterator() (db.Iterator, error) {
 	panic("unimplemented")
 }
@@ -448,7 +406,10 @@ func (d *dbImpl) GetSnapshot() db.Snapshot {
 }
 
 func (d *dbImpl) Close() error {
+	d.logger.Printf("Closing...")
+
 	d.writeSerializer.Close()
+	d.bgWork.Close()
 
 	_ = d.logfile.Sync()
 	_ = d.logfile.Close()
@@ -457,7 +418,7 @@ func (d *dbImpl) Close() error {
 
 func SetCurrentFile(env db.Env, dbname string, num uint64) error {
 	manifest := DescriptorFileName(dbname, num)
-	contents := strings.TrimPrefix(manifest, dbname)
+	contents := filepath.Base(manifest)
 
 	tmp := TempFileName(dbname, num)
 	f, err := env.NewWritableFile(tmp)

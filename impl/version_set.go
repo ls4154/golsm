@@ -170,9 +170,13 @@ func (b *VersionBuilder) SaveTo(v *Version) {
 
 		// Check there are no overlaps
 		util.AssertFunc(func() bool {
-			for i := 1; i < len(v.files[level]); i++ {
-				return b.vset.icmp.Compare(v.files[level][i-1].largest,
-					v.files[level][i].smallest) < 0
+			if level > 0 {
+				for i := 1; i < len(v.files[level]); i++ {
+					if b.vset.icmp.Compare(v.files[level][i-1].largest,
+						v.files[level][i].smallest) >= 0 {
+						return false
+					}
+				}
 			}
 			return true
 		})
@@ -186,7 +190,7 @@ func (b *VersionBuilder) MaybeAddFile(v *Version, level int, f *FileMetaData) {
 	}
 
 	util.AssertFunc(func() bool {
-		if len(v.files[level]) > 0 {
+		if level > 0 && len(v.files[level]) > 0 {
 			// Must not overlap
 			last := v.files[level][len(v.files[level])-1]
 			return b.vset.icmp.Compare(last.largest, f.smallest) < 0

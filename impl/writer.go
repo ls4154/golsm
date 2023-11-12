@@ -2,8 +2,10 @@ package impl
 
 import (
 	"sync"
+	"time"
 
 	"github.com/ls4154/golsm/db"
+	"github.com/ls4154/golsm/log"
 	"github.com/ls4154/golsm/util"
 )
 
@@ -21,9 +23,9 @@ type writeSerializer struct {
 	tempBatch  *WriteBatchImpl
 }
 
-func NewWriteSerializer(applyFn func(*WriteBatchImpl, bool) error) *writeSerializer {
+func (db *dbImpl) newWriteSerializer() *writeSerializer {
 	return &writeSerializer{
-		apply:      applyFn,
+		apply:      db.applyBatch,
 		writerCh:   make(chan *writer),
 		lastWriter: nil,
 		tempBatch:  NewWriteBatch(),
@@ -158,5 +160,61 @@ func (d *dbImpl) applyBatch(batch *WriteBatchImpl, sync bool) error {
 
 	d.versions.SetLastSequence(lastSeq + uint64(batch.count()))
 
+	if err != nil {
+		// TODO bg error
+	}
+
 	return err
+}
+
+func (d *dbImpl) makeRoomForWrite(force bool) error {
+	util.AssertMutexHeld(&d.mu)
+
+	allowDelay := !force
+	for {
+		// TODO bg error
+		if allowDelay && d.versions.NumLevelFiles(0) >= L0SlowDownTrigger {
+			d.mu.Unlock()
+			time.Sleep(time.Millisecond)
+			allowDelay = false // sleep only once
+			d.mu.Lock()
+		} else if !force && d.mem.ApproximateMemoryUsage() <= d.options.WriteBufferSize {
+			// ok
+			break
+		} else if d.imm != nil {
+			d.logger.Printf("Current memtable full; waiting...")
+			d.mu.Unlock()
+			d.bgWork.writerWaitForBGDone()
+			d.mu.Lock()
+		} else if d.versions.NumLevelFiles(0) >= L0StopWritesTrigger {
+			d.logger.Printf("Too many L0 files; waiting...")
+			d.mu.Unlock()
+			d.bgWork.writerWaitForBGDone()
+			d.mu.Lock()
+		} else {
+			// switch to a new log file and memtable
+			logNum := d.versions.NewFileNumber()
+			f, err := d.env.NewWritableFile(LogFileName(d.dbname, logNum))
+			if err != nil {
+				// TODO
+				return err
+			}
+
+			err = d.logfile.Close()
+			if err != nil {
+				// TODO bg err
+			}
+
+			d.logfile = f
+			d.logfileNum = logNum
+			d.log = log.NewWriter(f)
+
+			d.imm = d.mem
+			d.mem = NewMemTable(d.icmp)
+
+			force = false
+			d.scheduleFlush()
+		}
+	}
+	return nil
 }

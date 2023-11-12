@@ -204,3 +204,95 @@ func TestRecover(t *testing.T) {
 
 	ldb.Close()
 }
+
+func TestSnapshotWithBatch(t *testing.T) {
+	testDir := t.TempDir()
+	ldb, err := Open(db.DefaultOptions(), testDir)
+	require.NoError(t, err)
+
+	key1, key2, key3 := []byte("key1"), []byte("key2"), []byte("key3")
+	require.NoError(t, ldb.Put(key1, []byte("value1"), db.WriteOptions{}))
+	require.NoError(t, ldb.Put(key2, []byte("value2"), db.WriteOptions{}))
+
+	snap := ldb.GetSnapshot()
+
+	batch := NewWriteBatch()
+	batch.Put(key1, []byte("value1-updated"))
+	batch.Delete(key2)
+	batch.Put(key3, []byte("value3"))
+	require.NoError(t, ldb.Write(batch, db.WriteOptions{}))
+
+	// latest view
+	val, err := ldb.Get(key1, nil)
+	require.NoError(t, err)
+	require.Equal(t, "value1-updated", string(val))
+
+	_, err = ldb.Get(key2, nil)
+	require.ErrorIs(t, err, db.ErrNotFound)
+
+	val, err = ldb.Get(key3, nil)
+	require.NoError(t, err)
+	require.Equal(t, "value3", string(val))
+
+	// snapshot view
+	val, err = ldb.Get(key1, &db.ReadOptions{Snapshot: snap})
+	require.NoError(t, err)
+	require.Equal(t, "value1", string(val))
+
+	val, err = ldb.Get(key2, &db.ReadOptions{Snapshot: snap})
+	require.NoError(t, err)
+	require.Equal(t, "value2", string(val))
+
+	_, err = ldb.Get(key3, &db.ReadOptions{Snapshot: snap})
+	require.ErrorIs(t, err, db.ErrNotFound)
+
+	snap.Release()
+
+	ldb.Close()
+}
+
+func TestDBFlushAndRecover(t *testing.T) {
+	t.Skip("TODO: enable after implementing memtable flush / background compaction")
+
+	testDir := t.TempDir()
+	opt := db.DefaultOptions()
+	opt.WriteBufferSize = 1024
+	ldb, err := Open(opt, testDir)
+	require.NoError(t, err)
+
+	const totalKeys = 200
+	expected := make(map[string]string, totalKeys)
+
+	for i := 0; i < totalKeys; i++ {
+		key := fmt.Sprintf("key%04d", i)
+		val := fmt.Sprintf("val%04d", i)
+		require.NoError(t, ldb.Put([]byte(key), []byte(val), db.WriteOptions{}))
+		expected[key] = val
+
+		if i%5 == 0 {
+			require.NoError(t, ldb.Delete([]byte(key), db.WriteOptions{}))
+			delete(expected, key)
+		}
+	}
+
+	require.NoError(t, ldb.Close())
+
+	opt = db.DefaultOptions()
+	opt.WriteBufferSize = 1024
+	ldb, err = Open(opt, testDir)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, ldb.Close())
+	}()
+
+	for i := 0; i < totalKeys; i++ {
+		key := fmt.Sprintf("key%04d", i)
+		val, err := ldb.Get([]byte(key), nil)
+		if expectedVal, ok := expected[key]; ok {
+			require.NoError(t, err)
+			require.Equal(t, expectedVal, string(val))
+		} else {
+			require.ErrorIs(t, err, db.ErrNotFound)
+		}
+	}
+}
