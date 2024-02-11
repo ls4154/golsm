@@ -20,8 +20,25 @@ type Version struct {
 	compactionScore float64
 	compactionLevel int
 
+	refs int
+
 	next *Version
 	prev *Version
+}
+
+func (v *Version) Ref() {
+	v.refs++
+}
+
+func (v *Version) Unref() {
+	util.Assert(v.refs >= 1)
+	v.refs--
+	if v.refs == 0 {
+		v.prev.next = v.next
+		v.next.prev = v.prev
+		v.next = v
+		v.prev = v
+	}
 }
 
 func (v *Version) Get(lkey *LookupKey) ([]byte, error) {
@@ -90,6 +107,23 @@ func (v *Version) Get(lkey *LookupKey) ([]byte, error) {
 	}
 
 	return nil, db.ErrNotFound
+}
+
+func (v *Version) AddIterators(iters *[]db.Iterator) error {
+	for _, f := range v.files[0] {
+		it, err := v.vset.tableCache.NewIterator(f.number, f.size)
+		if err != nil {
+			return err
+		}
+
+		*iters = append(*iters, it)
+	}
+
+	for lv := 1; lv < NumLevels; lv++ {
+		// TODO
+	}
+
+	return nil
 }
 
 type VersionSet struct {
@@ -448,7 +482,11 @@ func (vs *VersionSet) NewVersion() *Version {
 }
 
 func (vs *VersionSet) AppendVersion(v *Version) {
-	// TODO ref counting?
+	if vs.current != nil {
+		vs.current.Unref()
+	}
+
+	v.Ref()
 	vs.current = v
 
 	v.prev = vs.dummyVersions.prev

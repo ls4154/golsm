@@ -24,6 +24,7 @@ type Iterator interface {
 	Key() []byte
 	Value() []byte
 	Error() error
+	Close() error
 }
 
 type Snapshot interface {
@@ -42,6 +43,7 @@ type Options struct {
 	BlockRestartInterval int
 	MaxFileSize          int
 	WriteBufferSize      int
+	MaxOpenFiles         int
 	Compression          CompressionType
 	Comparator           Comparator
 }
@@ -52,6 +54,7 @@ func DefaultOptions() *Options {
 		BlockRestartInterval: 16,
 		MaxFileSize:          4 * 1024 * 1024,
 		WriteBufferSize:      4 * 1024 * 1024,
+		MaxOpenFiles:         1000,
 		Compression:          NoCompression,
 	}
 }

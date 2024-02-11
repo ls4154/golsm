@@ -54,6 +54,7 @@ func readTable(t *testing.T, env db.Env, name string, numEntries int) {
 	require.NoError(t, err, "failed to open table")
 
 	it := tbl.NewIterator()
+	defer it.Close()
 	it.SeekToFirst()
 	for i := 0; i < numEntries; i++ {
 		key, value := getTestKeyValue(i)

@@ -16,6 +16,14 @@ type Table struct {
 	indexBlock *Block
 }
 
+func (t *Table) Close() error {
+	// file is not owned
+	t.file = nil
+	t.cmp = nil
+	t.indexBlock = nil
+	return nil
+}
+
 func OpenTable(file db.RandomAccessFile, size uint64, cmp db.Comparator) (*Table, error) {
 	// Footer
 	var buf [FooterLength]byte
@@ -119,6 +127,7 @@ func (t *Table) InternalGet(key []byte, handleFn func(k, v []byte)) error {
 		if err != nil {
 			return err
 		}
+		defer blockIter.Close()
 
 		blockIter.Seek(key)
 		if blockIter.Valid() {

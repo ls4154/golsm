@@ -48,7 +48,7 @@ func Open(options *db.Options, dbname string) (db.DB, error) {
 		userCmp: userCmp,
 	}
 	env := util.DefaultEnv()
-	tcache := NewTableCache(dbname, opt, env, icmp)
+	tcache := NewTableCache(dbname, env, options.MaxOpenFiles, icmp)
 	vset := NewVersionSet(dbname, icmp, env, tcache)
 	snapshots := NewSnapshotList()
 
@@ -305,7 +305,7 @@ func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit) error {
 	d.pendingOutputs[meta.number] = struct{}{}
 
 	iter := mem.Iterator()
-	// TODO defer iter.Close()
+	defer iter.Close()
 
 	d.logger.Printf("Level-0 table #%d: started", meta.number)
 
@@ -343,10 +343,19 @@ func (d *dbImpl) Get(key []byte, options *db.ReadOptions) ([]byte, error) {
 		seq = d.versions.GetLastSequence()
 	}
 
+	// NOTE: memtable lifetime is managed by Go GC
+
 	mem := d.mem
 	imm := d.imm
 	current := d.versions.current
+	current.Ref()
+
 	d.mu.Unlock()
+	defer func() {
+		d.mu.Lock()
+		current.Unref()
+		d.mu.Unlock()
+	}()
 
 	var lookupKey LookupKey
 	lookupKey.Set(key, seq)
@@ -396,8 +405,45 @@ func (d *dbImpl) Write(updates db.WriteBatch, options db.WriteOptions) error {
 	return d.writeSerializer.Write(updates, options)
 }
 
+// TODO read opt
 func (d *dbImpl) NewIterator() (db.Iterator, error) {
-	panic("unimplemented")
+	internalIter, latestSnapshot, err := d.newInternalIterator()
+	if err != nil {
+		return nil, err
+	}
+	return newDBIter(internalIter, d.icmp.userCmp, latestSnapshot), nil
+}
+
+func (d *dbImpl) newInternalIterator() (db.Iterator, uint64, error) {
+	iters := make([]db.Iterator, 0, 4)
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	latestSnapshot := d.versions.GetLastSequence()
+	current := d.versions.current
+
+	iters = append(iters, d.mem.Iterator())
+	if d.imm != nil {
+		iters = append(iters, d.imm.Iterator())
+	}
+
+	err := current.AddIterators(&iters)
+	if err != nil {
+		for _, it := range iters {
+			_ = it.Close()
+		}
+		return nil, 0, err
+	}
+
+	current.Ref()
+
+	internalIter := newMergingIterator(d.icmp, iters)
+	return newCleanupIterator(internalIter, func() {
+		d.mu.Lock()
+		current.Unref()
+		d.mu.Unlock()
+	}), latestSnapshot, nil
 }
 
 func (d *dbImpl) GetSnapshot() db.Snapshot {
@@ -449,4 +495,58 @@ func SetCurrentFile(env db.Env, dbname string, num uint64) error {
 	}
 
 	return nil
+}
+
+func (d *dbImpl) RemoveObsoleteFiles() {
+	util.AssertMutexHeld(&d.mu)
+
+	// TODO check bg error
+
+	live := d.versions.LiveFiles()
+	for num := range d.pendingOutputs {
+		live[num] = struct{}{}
+	}
+
+	fileNames, err := d.env.GetChildren(d.dbname)
+	if err != nil {
+		d.logger.Printf("DeleteObsoleteFiles: %v", err)
+		return
+	}
+
+	filesToDelete := []string{}
+
+	for _, fname := range fileNames {
+		ftype, fnum, ok := ParseFileName(fname)
+		if !ok {
+			continue
+		}
+
+		keep := true
+		switch ftype {
+		case FileTypeLog:
+			// TODO remove older log files
+			keep = true
+		case FileTypeDescriptor:
+			// TODO remove older manifest
+			keep = true
+		case FileTypeCurrent, FileTypeLock, FileTypeInfoLog:
+			keep = true
+		case FileTypeTable, FileTypeTemp:
+			_, keep = live[fnum]
+		default:
+			keep = true
+		}
+
+		if !keep {
+			// TODO evict table file
+			filesToDelete = append(filesToDelete, fname)
+			d.logger.Printf("Delete type=%d #%d", ftype, fnum)
+		}
+	}
+
+	d.mu.Unlock()
+	for _, fname := range filesToDelete {
+		_ = d.env.RemoveFile(filepath.Join(d.dbname, fname))
+	}
+	d.mu.Lock()
 }

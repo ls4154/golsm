@@ -36,7 +36,7 @@ func (d *dbImpl) compactMemTable() {
 
 	if err == nil {
 		d.imm = nil
-		// TODO remove obsolete files
+		d.RemoveObsoleteFiles()
 	} else {
 		// TODO bg error
 	}

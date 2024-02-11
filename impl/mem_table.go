@@ -3,6 +3,7 @@ package impl
 import (
 	"encoding/binary"
 
+	"github.com/ls4154/golsm/db"
 	"github.com/ls4154/golsm/skiplist"
 )
 
@@ -69,6 +70,7 @@ func (mt *MemTable) Get(lookupKey *LookupKey) (value []byte, deleted, exist bool
 
 func (mt *MemTable) Iterator() *MemTableIterator {
 	return &MemTableIterator{
+		mt:      mt,
 		listIter: mt.list.Iterator(),
 	}
 }
@@ -77,9 +79,10 @@ func (mt *MemTable) ApproximateMemoryUsage() int {
 	return mt.arena.MemoryUsage()
 }
 
-var _ internalIterator = &MemTableIterator{}
+var _ db.Iterator = &MemTableIterator{}
 
 type MemTableIterator struct {
+	mt       *MemTable
 	listIter *skiplist.Iterator
 }
 
@@ -116,5 +119,11 @@ func (it *MemTableIterator) Value() []byte {
 }
 
 func (it *MemTableIterator) Error() error {
+	return nil
+}
+
+func (it *MemTableIterator) Close() error {
+	it.listIter = nil
+	it.mt = nil
 	return nil
 }

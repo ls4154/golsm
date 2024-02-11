@@ -81,6 +81,9 @@ func (it *TwoLevelIterator) Value() []byte {
 
 func (it *TwoLevelIterator) initDataBlock() {
 	if !it.indexIter.Valid() {
+		if it.dataIter != nil {
+			_ = it.dataIter.Close()
+		}
 		it.dataIter = nil
 		return
 	}
@@ -92,6 +95,9 @@ func (it *TwoLevelIterator) initDataBlock() {
 	}
 
 	it.dataBlockHandle = append(it.dataBlockHandle[:0], handle...)
+	if it.dataIter != nil {
+		_ = it.dataIter.Close()
+	}
 	iter, err := it.blockFn(handle)
 	if err != nil {
 		it.err = err
@@ -136,4 +142,19 @@ func (it *TwoLevelIterator) Error() error {
 		return it.dataIter.Error()
 	}
 	return it.err
+}
+
+func (it *TwoLevelIterator) Close() error {
+	var err error
+	if it.dataIter != nil {
+		err = it.dataIter.Close()
+		it.dataIter = nil
+	}
+	if it.indexIter != nil {
+		if cerr := it.indexIter.Close(); err == nil {
+			err = cerr
+		}
+		it.indexIter = nil
+	}
+	return err
 }

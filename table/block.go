@@ -293,6 +293,10 @@ func (it *BlockIterator) Error() error {
 	return it.err
 }
 
+func (it *BlockIterator) Close() error {
+	return nil
+}
+
 type BlockBuilder struct {
 	lastKey         []byte
 	restartPoints   []int
