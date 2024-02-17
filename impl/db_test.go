@@ -156,6 +156,86 @@ func TestSnapshot(t *testing.T) {
 	ldb.Close()
 }
 
+func TestDBIteratorBasic(t *testing.T) {
+	testDir := t.TempDir()
+	ldb, err := Open(db.DefaultOptions(), testDir)
+	require.NoError(t, err)
+	defer ldb.Close()
+
+	require.NoError(t, ldb.Put([]byte("a"), []byte("1"), db.WriteOptions{}))
+	require.NoError(t, ldb.Put([]byte("b"), []byte("@"), db.WriteOptions{}))
+	require.NoError(t, ldb.Put([]byte("c"), []byte("3"), db.WriteOptions{}))
+	require.NoError(t, ldb.Put([]byte("cc"), []byte("33"), db.WriteOptions{}))
+
+	require.NoError(t, ldb.Put([]byte("b"), []byte("2"), db.WriteOptions{}))
+	require.NoError(t, ldb.Delete([]byte("cc"), db.WriteOptions{}))
+
+	require.NoError(t, ldb.Put([]byte("d"), []byte("4"), db.WriteOptions{}))
+	require.NoError(t, ldb.Put([]byte("e"), []byte("5"), db.WriteOptions{}))
+
+	it, err := ldb.NewIterator(nil)
+	require.NoError(t, err)
+	defer it.Close()
+
+	expectedKeys := []string{"a", "b", "c", "d", "e"}
+	expectedVals := []string{"1", "2", "3", "4", "5"}
+
+	it.SeekToFirst()
+	i := 0
+	for it.Valid() {
+		require.Equal(t, expectedKeys[i], string(it.Key()))
+		require.Equal(t, expectedVals[i], string(it.Value()))
+		it.Next()
+		i++
+	}
+	require.Equal(t, len(expectedKeys), i)
+
+	it.SeekToLast()
+	i = len(expectedKeys) - 1
+	for it.Valid() {
+		require.Equal(t, expectedKeys[i], string(it.Key()))
+		require.Equal(t, expectedVals[i], string(it.Value()))
+		it.Prev()
+		i--
+	}
+	require.Equal(t, -1, i)
+
+	it.Seek([]byte("c"))
+	i = 2
+	for it.Valid() {
+		require.Equal(t, expectedKeys[i], string(it.Key()))
+		require.Equal(t, expectedVals[i], string(it.Value()))
+		it.Next()
+		i++
+	}
+	require.Equal(t, len(expectedKeys), i)
+
+	it.Seek([]byte("c"))
+	i = 2
+	for it.Valid() {
+		require.Equal(t, expectedKeys[i], string(it.Key()))
+		require.Equal(t, expectedVals[i], string(it.Value()))
+		it.Prev()
+		i--
+	}
+	require.Equal(t, -1, i)
+
+	it.Seek([]byte("A"))
+	require.True(t, it.Valid())
+	require.Equal(t, "a", string(it.Key()))
+	require.Equal(t, "1", string(it.Value()))
+
+	it.Seek([]byte("cc"))
+	require.True(t, it.Valid())
+	require.Equal(t, "d", string(it.Key()))
+	require.Equal(t, "4", string(it.Value()))
+
+	it.Seek([]byte("z"))
+	require.False(t, it.Valid())
+
+	require.NoError(t, it.Error())
+}
+
 func TestSnapshotDelete(t *testing.T) {
 	testDir := t.TempDir()
 	ldb, err := Open(db.DefaultOptions(), testDir)

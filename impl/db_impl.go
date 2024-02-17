@@ -405,16 +405,21 @@ func (d *dbImpl) Write(updates db.WriteBatch, options db.WriteOptions) error {
 	return d.writeSerializer.Write(updates, options)
 }
 
-// TODO read opt
-func (d *dbImpl) NewIterator() (db.Iterator, error) {
-	internalIter, latestSnapshot, err := d.newInternalIterator()
+func (d *dbImpl) NewIterator(options *db.ReadOptions) (db.Iterator, error) {
+	internalIter, latestSnapshot, err := d.newInternalIterator(options)
 	if err != nil {
 		return nil, err
 	}
-	return newDBIter(internalIter, d.icmp.userCmp, latestSnapshot), nil
+	var seq uint64
+	if options != nil && options.Snapshot != nil {
+		seq = options.Snapshot.(*Snapshot).seq
+	} else {
+		seq = latestSnapshot
+	}
+	return newDBIter(internalIter, d.icmp.userCmp, seq), nil
 }
 
-func (d *dbImpl) newInternalIterator() (db.Iterator, uint64, error) {
+func (d *dbImpl) newInternalIterator(options *db.ReadOptions) (db.Iterator, uint64, error) {
 	iters := make([]db.Iterator, 0, 4)
 
 	d.mu.Lock()

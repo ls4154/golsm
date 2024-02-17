@@ -9,7 +9,7 @@ type DB interface {
 	Put(key, value []byte, options WriteOptions) error
 	Delete(key []byte, options WriteOptions) error
 	Write(batch WriteBatch, options WriteOptions) error
-	NewIterator() (Iterator, error)
+	NewIterator(options *ReadOptions) (Iterator, error)
 	GetSnapshot() Snapshot
 	Close() error
 }
@@ -60,9 +60,9 @@ func DefaultOptions() *Options {
 }
 
 type ReadOptions struct {
+	Snapshot       Snapshot
 	VerifyChecksum bool
 	BypassCache    bool
-	Snapshot       Snapshot
 }
 
 type WriteOptions struct {
