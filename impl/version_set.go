@@ -126,6 +126,51 @@ func (v *Version) AddIterators(iters *[]db.Iterator) error {
 	return nil
 }
 
+func (v *Version) getOverlappingFiles(level int, begin, end []byte) []*FileMetaData {
+	var hasBegin, hasEnd bool
+	var userBegin, userEnd []byte
+	if len(begin) > 0 {
+		hasBegin = true
+		userBegin = ExtractUserKey(begin)
+	}
+	if len(end) > 0 {
+		hasEnd = true
+		userEnd = ExtractUserKey(end)
+	}
+
+	files := []*FileMetaData{}
+	userCmp := v.vset.icmp.userCmp
+
+restart:
+	for _, f := range v.files[level] {
+		fStart := ExtractUserKey(f.smallest)
+		fLimit := ExtractUserKey(f.largest)
+
+		if hasBegin && userCmp.Compare(fLimit, userBegin) < 0 {
+			// no overlap
+		} else if hasEnd && userCmp.Compare(fStart, userEnd) > 0 {
+			// no overlap
+		} else {
+			files = append(files, f)
+
+			// check whether range is expanded for level 0
+			if level == 0 {
+				if hasBegin && userCmp.Compare(fStart, userBegin) < 0 {
+					userBegin = fStart
+					files = files[:0]
+					goto restart
+				} else if hasEnd && userCmp.Compare(fLimit, userEnd) > 0 {
+					userEnd = fLimit
+					files = files[:0]
+					goto restart
+				}
+			}
+		}
+	}
+
+	return files
+}
+
 type VersionSet struct {
 	dbname     string
 	tableCache *TableCache
@@ -146,6 +191,22 @@ type VersionSet struct {
 	compactPointer [NumLevels][]byte
 
 	env db.Env
+}
+
+type Compaction struct {
+	level int
+
+	inputVersion *Version
+	inputs       [2][]*FileMetaData
+	edit         VersionEdit
+}
+
+func (c *Compaction) IsTrivial() bool {
+	return len(c.inputs[0]) == 1 && len(c.inputs[1]) == 0
+}
+
+func (c *Compaction) Release() {
+	c.inputVersion.Unref()
 }
 
 type VersionBuilder struct {
@@ -518,6 +579,94 @@ func (vs *VersionSet) Finalize(v *Version) {
 	v.compactionScore = bestScore
 }
 
+func (vs *VersionSet) NeedsCompaction() bool {
+	return vs.current.compactionScore >= 1
+}
+
+func (vs *VersionSet) PickCompaction() *Compaction {
+	cur := vs.current
+	if cur.compactionScore < 1 {
+		return nil
+	}
+
+	level := cur.compactionLevel
+	util.Assert(level >= 0)
+	util.Assert(level+1 < NumLevels)
+
+	if len(cur.files[level]) == 0 {
+		return nil
+	}
+
+	c := &Compaction{
+		level:        level,
+		inputVersion: cur,
+	}
+	cur.Ref()
+
+	vs.setupBaseInputs(c)
+	vs.setupOtherInputs(c)
+
+	return c
+}
+
+func (vs *VersionSet) setupBaseInputs(c *Compaction) {
+	level := c.level
+
+	cur := c.inputVersion
+	files := cur.files[level]
+
+	util.Assert(len(files) > 0)
+
+	// select file using compactPointer for round-robin progress
+	ptr := vs.compactPointer[level]
+	for _, f := range files {
+		if len(ptr) <= 0 || vs.icmp.Compare(f.largest, ptr) > 0 {
+			c.inputs[0] = append(c.inputs[0], f)
+			break
+		}
+	}
+
+	if len(c.inputs[0]) == 0 {
+		c.inputs[0] = append(c.inputs[0], files[0])
+	}
+
+	if level == 0 {
+		// L0 files may overlap each other, include the full overlapping  first.
+		smallest, largest := getRange(vs.icmp, c.inputs[0])
+		c.inputs[0] = cur.getOverlappingFiles(0, smallest, largest)
+	}
+}
+
+func (vs *VersionSet) setupOtherInputs(c *Compaction) {
+	level := c.level
+	cur := c.inputVersion
+
+	addBoundaryInputs(vs.icmp, cur.files[level], &c.inputs[0])
+
+	smallest, largest := getRange(vs.icmp, c.inputs[0])
+
+	c.inputs[1] = cur.getOverlappingFiles(level+1, smallest, largest)
+
+	addBoundaryInputs(vs.icmp, cur.files[level+1], &c.inputs[1])
+
+	allStart, allLimit := getRange(vs.icmp, append(c.inputs[0], c.inputs[1]...))
+
+	if len(c.inputs[1]) > 0 {
+		// TODO try expand base level without exapanding next level
+		_ = allStart
+		_ = allLimit
+	}
+
+	if level+2 < NumLevels {
+		// TODO grandparent level
+		_ = allStart
+		_ = allLimit
+	}
+
+	vs.compactPointer[level] = largest
+	c.edit.SetCompactPointer(level, largest)
+}
+
 func (vs *VersionSet) NewBuilder(v *Version) *VersionBuilder {
 	builder := &VersionBuilder{
 		vset: v.vset,
@@ -564,4 +713,67 @@ func maxBytesForlevel(level int) float64 {
 		level--
 	}
 	return result
+}
+
+func getRange(icmp *InternalKeyComparator, files []*FileMetaData) ([]byte, []byte) {
+	smallest := files[0].smallest
+	largest := files[0].largest
+	for i := 1; i < len(files); i++ {
+		f := files[i]
+		if icmp.Compare(f.smallest, smallest) < 0 {
+			smallest = f.smallest
+		}
+		if icmp.Compare(f.largest, largest) > 0 {
+			largest = f.largest
+		}
+	}
+	return smallest, largest
+}
+
+// Extend upper boundary to ensure the same user key is not split across multiple sstable files.
+func addBoundaryInputs(icmp *InternalKeyComparator, levelFiles []*FileMetaData, compactionFiles *[]*FileMetaData) {
+	if len(*compactionFiles) == 0 {
+		return
+	}
+
+	largest := findLargestKey(icmp, *compactionFiles)
+
+	keepSearch := true
+	for keepSearch {
+		f := findSmallestBoundaryFile(icmp, levelFiles, largest)
+		if f != nil {
+			*compactionFiles = append(*compactionFiles, f)
+			largest = f.largest
+		} else {
+			keepSearch = false
+		}
+	}
+}
+
+func findLargestKey(icmp *InternalKeyComparator, files []*FileMetaData) []byte {
+	util.Assert(len(files) > 0)
+
+	largest := files[0].largest
+	for i := 0; i < len(files); i++ {
+		f := files[i]
+		if icmp.Compare(f.largest, largest) > 0 {
+			largest = f.largest
+		}
+	}
+	return largest
+}
+
+func findSmallestBoundaryFile(icmp *InternalKeyComparator, files []*FileMetaData, largestKey []byte) *FileMetaData {
+	userCmp := icmp.userCmp
+	largestUserKey := ExtractUserKey(largestKey)
+	var ret *FileMetaData
+	for _, f := range files {
+		if icmp.Compare(f.smallest, largestKey) > 0 && userCmp.Compare(ExtractUserKey(f.smallest), largestUserKey) == 0 {
+			if ret == nil || icmp.Compare(f.smallest, ret.smallest) < 0 {
+				ret = f
+			}
+		}
+	}
+
+	return ret
 }

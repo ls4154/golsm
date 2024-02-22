@@ -35,3 +35,11 @@ func (l *SnapshotList) NewSnapshot(seq uint64) *Snapshot {
 	s.next.prev = s
 	return s
 }
+
+func (l *SnapshotList) Empty() bool {
+	return l.head.next == &l.head
+}
+
+func (l *SnapshotList) Oldest() *Snapshot {
+	return l.head.next
+}
