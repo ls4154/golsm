@@ -184,12 +184,12 @@ func (d *dbImpl) makeRoomForWrite(force bool) error {
 		} else if d.imm != nil {
 			d.logger.Printf("Current memtable full; waiting...")
 			d.mu.Unlock()
-			d.bgWork.writerWaitForBGDone()
+			d.bgWork.writerWaitForFlushDone()
 			d.mu.Lock()
 		} else if d.versions.NumLevelFiles(0) >= L0StopWritesTrigger {
 			d.logger.Printf("Too many L0 files; waiting...")
 			d.mu.Unlock()
-			d.bgWork.writerWaitForBGDone()
+			d.bgWork.writerWaitForFlushDone()
 			d.mu.Lock()
 		} else {
 			// switch to a new log file and memtable

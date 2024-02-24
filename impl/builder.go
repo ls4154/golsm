@@ -14,7 +14,6 @@ func BuildTable(dbname string, env db.Env, iter db.Iterator,
 	}
 
 	fname := TableFileName(dbname, meta.number)
-	var err error
 	f, err := env.NewWritableFile(fname)
 	if err != nil {
 		return err

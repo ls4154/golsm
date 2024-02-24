@@ -209,6 +209,34 @@ func (c *Compaction) Release() {
 	c.inputVersion.Unref()
 }
 
+func (c *Compaction) NewInputIterator() (db.Iterator, error) {
+	// TODO read opt
+	vset := c.inputVersion.vset
+
+	numIters := 2
+	if c.level == 0 {
+		numIters = len(c.inputs[0]) + 1
+	}
+	iters := make([]db.Iterator, 0, numIters)
+
+	for i := 0; i < 2; i++ {
+		level := c.level + i
+
+		// TODO concat iter for L1+
+		_ = level
+
+		for _, f := range c.inputs[i] {
+			it, err := vset.tableCache.NewIterator(f.number, f.size)
+			if err != nil {
+				return nil, err
+			}
+			iters = append(iters, it)
+		}
+	}
+
+	return newMergingIterator(vset.icmp, iters), nil
+}
+
 type VersionBuilder struct {
 	vset *VersionSet
 	base *Version
@@ -764,11 +792,11 @@ func findLargestKey(icmp *InternalKeyComparator, files []*FileMetaData) []byte {
 }
 
 func findSmallestBoundaryFile(icmp *InternalKeyComparator, files []*FileMetaData, largestKey []byte) *FileMetaData {
-	userCmp := icmp.userCmp
+	ucmp := icmp.userCmp
 	largestUserKey := ExtractUserKey(largestKey)
 	var ret *FileMetaData
 	for _, f := range files {
-		if icmp.Compare(f.smallest, largestKey) > 0 && userCmp.Compare(ExtractUserKey(f.smallest), largestUserKey) == 0 {
+		if icmp.Compare(f.smallest, largestKey) > 0 && ucmp.Compare(ExtractUserKey(f.smallest), largestUserKey) == 0 {
 			if ret == nil || icmp.Compare(f.smallest, ret.smallest) < 0 {
 				ret = f
 			}

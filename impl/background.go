@@ -45,18 +45,18 @@ func (d *dbImpl) compactMemTable() {
 type bgWork struct {
 	db *dbImpl
 
-	flushCh      chan struct{}
-	compCh       chan struct{}
-	writerWaitCh chan struct{}
-	wg           sync.WaitGroup
+	flushCh     chan struct{}
+	compCh      chan struct{}
+	flushDoneCh chan struct{}
+	wg          sync.WaitGroup
 }
 
 func (d *dbImpl) newBgWork() *bgWork {
 	return &bgWork{
-		db:           d,
-		flushCh:      make(chan struct{}, 1),
-		compCh:       make(chan struct{}, 1),
-		writerWaitCh: make(chan struct{}, 1),
+		db:          d,
+		flushCh:     make(chan struct{}, 1),
+		compCh:      make(chan struct{}, 1),
+		flushDoneCh: make(chan struct{}, 1),
 	}
 }
 
@@ -67,9 +67,17 @@ func (bg *bgWork) ScheduleFlush() {
 	}
 }
 
+func (bg *bgWork) ScheduleCompaction() {
+	select {
+	case bg.compCh <- struct{}{}:
+	default:
+	}
+}
+
 func (bg *bgWork) Run() {
-	bg.wg.Add(1)
+	bg.wg.Add(2)
 	go bg.flushMain()
+	go bg.compactionMain()
 }
 
 func (bg *bgWork) flushMain() {
@@ -89,16 +97,55 @@ func (bg *bgWork) doFlush() {
 		db.compactMemTable()
 	}
 
-	// TODO maybe schedule compaction
+	bg.ScheduleCompaction()
 
 	select {
-	case bg.writerWaitCh <- struct{}{}:
+	case bg.flushDoneCh <- struct{}{}:
 	default:
 	}
 }
 
-func (bg *bgWork) writerWaitForBGDone() {
-	<-bg.writerWaitCh
+// for writeSerializer only
+func (bg *bgWork) writerWaitForFlushDone() {
+	<-bg.flushDoneCh
+}
+
+func (bg *bgWork) compactionMain() {
+	defer bg.wg.Done()
+	for range bg.compCh {
+		bg.doCompaction()
+	}
+}
+
+func (bg *bgWork) doCompaction() {
+	d := bg.db
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	comp := d.versions.PickCompaction()
+	if comp == nil {
+		return
+	}
+
+	var err error
+	if comp.IsTrivial() {
+		err = d.doTrivialMove(comp)
+		if err != nil {
+			// TODO bg err? already recorded in doTrivialMove
+		}
+		comp.Release()
+	} else {
+		err = d.doCompactionWork(comp)
+		if err != nil {
+			// TODO bg err? already recorded in doCompactionWork
+		}
+		// TODO cleanup
+		comp.Release()
+		d.RemoveObsoleteFiles()
+	}
+
+	bg.ScheduleCompaction()
 }
 
 func (bg *bgWork) Close() {

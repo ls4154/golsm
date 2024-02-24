@@ -41,7 +41,7 @@ const (
 type Options struct {
 	BlockSize            int
 	BlockRestartInterval int
-	MaxFileSize          int
+	MaxFileSize          uint64
 	WriteBufferSize      int
 	MaxOpenFiles         int
 	Compression          CompressionType
