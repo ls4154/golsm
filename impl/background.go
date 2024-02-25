@@ -150,5 +150,6 @@ func (bg *bgWork) doCompaction() {
 
 func (bg *bgWork) Close() {
 	close(bg.flushCh)
+	close(bg.compCh)
 	bg.wg.Wait()
 }

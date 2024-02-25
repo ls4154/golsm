@@ -108,6 +108,8 @@ func (d *dbImpl) doCompactionWork(c *Compaction) error {
 			}
 			curOutput.largest = append(curOutput.largest[:0], key...)
 
+			builder.Add(key, input.Value())
+
 			if builder.FileSize() >= d.options.MaxFileSize {
 				finErr := d.FinishCompactionOutputFile(curOutput, curOutfile, builder, input.Error() != nil)
 				if finErr != nil {
@@ -181,9 +183,9 @@ func (d *dbImpl) FinishCompactionOutputFile(out *FileMetaData, outfile db.Writab
 ) error {
 	var err error
 	if abandon {
-		err = builder.Finish()
-	} else {
 		builder.Abandon()
+	} else {
+		err = builder.Finish()
 	}
 
 	currentEntries := builder.NumEntries()
@@ -214,7 +216,7 @@ func (d *dbImpl) ApplyCompaction(c *Compaction, outputs []*FileMetaData) error {
 
 	// delete input files
 	for i := 0; i < 2; i++ {
-		for _, f := range c.inputs[0] {
+		for _, f := range c.inputs[i] {
 			c.edit.RemoveFile(f.number, f.level)
 		}
 	}
@@ -232,10 +234,13 @@ func keyNotExistsInHigherLevel(userKey []byte, userCmp db.Comparator, v *Version
 		for levelPtrs[lv] < len(files) {
 			f := files[levelPtrs[lv]]
 			if userCmp.Compare(userKey, ExtractUserKey(f.largest)) <= 0 {
+				if userCmp.Compare(userKey, ExtractUserKey(f.smallest)) >= 0 {
+					return false
+				}
+				break
 			}
-			break
+			levelPtrs[lv]++
 		}
-		levelPtrs[lv]++
 	}
 	return true
 }
