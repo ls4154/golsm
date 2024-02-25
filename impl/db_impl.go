@@ -33,6 +33,8 @@ type dbImpl struct {
 	writeSerializer *writeSerializer
 	bgWork          *bgWork
 
+	bgErr error
+
 	logger db.Logger
 }
 
@@ -505,7 +507,9 @@ func SetCurrentFile(env db.Env, dbname string, num uint64) error {
 func (d *dbImpl) RemoveObsoleteFiles() {
 	util.AssertMutexHeld(&d.mu)
 
-	// TODO check bg error
+	if d.bgErr != nil {
+		return
+	}
 
 	live := d.versions.LiveFiles()
 	for num := range d.pendingOutputs {
@@ -554,4 +558,13 @@ func (d *dbImpl) RemoveObsoleteFiles() {
 		_ = d.env.RemoveFile(filepath.Join(d.dbname, fname))
 	}
 	d.mu.Lock()
+}
+
+func (d *dbImpl) RecordBackgroundError(err error) {
+	util.AssertMutexHeld(&d.mu)
+	if d.bgErr == nil {
+		d.logger.Printf("RecordBackgroundError %v", err)
+		d.bgErr = err
+		// TODO signal?
+	}
 }

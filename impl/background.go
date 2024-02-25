@@ -38,7 +38,7 @@ func (d *dbImpl) compactMemTable() {
 		d.imm = nil
 		d.RemoveObsoleteFiles()
 	} else {
-		// TODO bg error
+		d.RecordBackgroundError(err)
 	}
 }
 
@@ -48,6 +48,7 @@ type bgWork struct {
 	flushCh     chan struct{}
 	compCh      chan struct{}
 	flushDoneCh chan struct{}
+	compDoneCh  chan struct{}
 	wg          sync.WaitGroup
 }
 
@@ -57,6 +58,7 @@ func (d *dbImpl) newBgWork() *bgWork {
 		flushCh:     make(chan struct{}, 1),
 		compCh:      make(chan struct{}, 1),
 		flushDoneCh: make(chan struct{}, 1),
+		compDoneCh:  make(chan struct{}, 1),
 	}
 }
 
@@ -88,13 +90,15 @@ func (bg *bgWork) flushMain() {
 }
 
 func (bg *bgWork) doFlush() {
-	db := bg.db
+	d := bg.db
 
-	db.mu.Lock()
-	defer db.mu.Unlock()
+	d.logger.Printf("doCompaction start")
 
-	if db.imm != nil {
-		db.compactMemTable()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.imm != nil {
+		d.compactMemTable()
 	}
 
 	bg.ScheduleCompaction()
@@ -120,32 +124,47 @@ func (bg *bgWork) compactionMain() {
 func (bg *bgWork) doCompaction() {
 	d := bg.db
 
+	d.logger.Printf("doCompaction start")
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	comp := d.versions.PickCompaction()
-	if comp == nil {
-		return
+	d.logger.Printf("picked compaction %+v", comp)
+	if comp != nil {
+		var err error
+		if comp.IsTrivial() {
+			err = d.doTrivialMove(comp)
+			if err != nil {
+				// TODO bg err is already recorded in doTrivialMove
+				d.RecordBackgroundError(err)
+			}
+			comp.Release()
+		} else {
+			err = d.doCompactionWork(comp)
+			if err != nil {
+				// TODO bg err is already recorded in doCompactionWork
+				d.RecordBackgroundError(err)
+			}
+			// TODO cleanup
+			comp.Release()
+			d.RemoveObsoleteFiles()
+		}
+
+		if err != nil {
+			bg.ScheduleCompaction()
+		}
 	}
 
-	var err error
-	if comp.IsTrivial() {
-		err = d.doTrivialMove(comp)
-		if err != nil {
-			// TODO bg err? already recorded in doTrivialMove
-		}
-		comp.Release()
-	} else {
-		err = d.doCompactionWork(comp)
-		if err != nil {
-			// TODO bg err? already recorded in doCompactionWork
-		}
-		// TODO cleanup
-		comp.Release()
-		d.RemoveObsoleteFiles()
+	select {
+	case bg.compDoneCh <- struct{}{}:
+	default:
 	}
+}
 
-	bg.ScheduleCompaction()
+// for writeSerializer only
+func (bg *bgWork) writerWaitForCompactionDone() {
+	<-bg.compDoneCh
 }
 
 func (bg *bgWork) Close() {

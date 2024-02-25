@@ -160,10 +160,6 @@ func (d *dbImpl) applyBatch(batch *WriteBatchImpl, sync bool) error {
 
 	d.versions.SetLastSequence(lastSeq + uint64(batch.count()))
 
-	if err != nil {
-		// TODO bg error
-	}
-
 	return err
 }
 
@@ -172,8 +168,9 @@ func (d *dbImpl) makeRoomForWrite(force bool) error {
 
 	allowDelay := !force
 	for {
-		// TODO bg error
-		if allowDelay && d.versions.NumLevelFiles(0) >= L0SlowDownTrigger {
+		if d.bgErr != nil {
+			return d.bgErr
+		} else if allowDelay && d.versions.NumLevelFiles(0) >= L0SlowDownTrigger {
 			d.mu.Unlock()
 			time.Sleep(time.Millisecond)
 			allowDelay = false // sleep only once
@@ -189,20 +186,20 @@ func (d *dbImpl) makeRoomForWrite(force bool) error {
 		} else if d.versions.NumLevelFiles(0) >= L0StopWritesTrigger {
 			d.logger.Printf("Too many L0 files; waiting...")
 			d.mu.Unlock()
-			d.bgWork.writerWaitForFlushDone()
+			d.bgWork.writerWaitForCompactionDone()
 			d.mu.Lock()
 		} else {
 			// switch to a new log file and memtable
 			logNum := d.versions.NewFileNumber()
 			f, err := d.env.NewWritableFile(LogFileName(d.dbname, logNum))
 			if err != nil {
-				// TODO
+				// TODO reuse file number?
 				return err
 			}
 
 			err = d.logfile.Close()
 			if err != nil {
-				// TODO bg err
+				d.RecordBackgroundError(err)
 			}
 
 			d.logfile = f

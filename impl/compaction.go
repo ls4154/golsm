@@ -17,7 +17,7 @@ func (d *dbImpl) doTrivialMove(c *Compaction) error {
 
 	err := d.versions.LogAndApply(&c.edit, &d.mu)
 	if err != nil {
-		// TODO bg error
+		d.RecordBackgroundError(err)
 	}
 
 	d.logger.Printf("Moved #%d to level-%d %d bytes %v\n", f.number, c.level+1, f.size, err)
@@ -40,8 +40,8 @@ func (d *dbImpl) doCompactionWork(c *Compaction) error {
 
 	input, err := c.NewInputIterator()
 	if err != nil {
-		// TODO bg error
-		panic("NewInputIterator error")
+		d.RecordBackgroundError(err)
+		return err
 	}
 
 	d.mu.Unlock()
@@ -154,7 +154,7 @@ func (d *dbImpl) doCompactionWork(c *Compaction) error {
 	}
 
 	if err != nil {
-		// TODO bg error
+		d.RecordBackgroundError(err)
 	}
 
 	return err
