@@ -157,6 +157,8 @@ func (d *dbImpl) doCompactionWork(c *Compaction) error {
 		d.RecordBackgroundError(err)
 	}
 
+	d.CleaunupCompaction(builder, curOutfile, outputs)
+
 	return err
 }
 
@@ -164,7 +166,7 @@ func (d *dbImpl) NewCompactionOutputBuilder() (*table.TableBuilder, uint64, db.W
 	d.mu.Lock()
 
 	fileNum := d.versions.NewFileNumber()
-	d.pendingOutputs[fileNum] = struct{}{}
+	d.RegisterPendingOutput(fileNum)
 
 	d.mu.Unlock()
 
@@ -226,6 +228,22 @@ func (d *dbImpl) ApplyCompaction(c *Compaction, outputs []*FileMetaData) error {
 	}
 
 	return d.versions.LogAndApply(&c.edit, &d.mu)
+}
+
+func (d *dbImpl) CleaunupCompaction(builder *table.TableBuilder, file db.WritableFile, outputs []*FileMetaData) {
+	util.AssertMutexHeld(&d.mu)
+
+	if builder != nil {
+		builder.Abandon()
+	}
+
+	if file != nil {
+		file.Close()
+	}
+
+	for _, f := range outputs {
+		d.UnregisterPendingOutput(f.number)
+	}
 }
 
 func keyNotExistsInHigherLevel(userKey []byte, userCmp db.Comparator, v *Version, checkFrom int, levelPtrs *[NumLevels]int) bool {

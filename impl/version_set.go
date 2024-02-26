@@ -349,6 +349,8 @@ func NewVersionSet(dbname string, icmp *InternalKeyComparator, env db.Env, table
 }
 
 func (vs *VersionSet) LogAndApply(edit *VersionEdit, mu *sync.Mutex) error {
+	util.AssertMutexHeld(mu)
+
 	if edit.hasLogNumber {
 		util.Assert(edit.logNumber >= vs.logNumber)
 		util.Assert(edit.logNumber < vs.nextFileNumber)

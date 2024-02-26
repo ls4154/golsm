@@ -25,14 +25,19 @@ func (d *dbImpl) compactMemTable() {
 	util.AssertMutexHeld(&d.mu)
 	util.Assert(d.imm != nil)
 
+	fnum := d.versions.NewFileNumber()
+	d.RegisterPendingOutput(fnum)
+
 	edit := VersionEdit{}
-	err := d.WriteLevel0Table(d.imm, &edit)
+	err := d.WriteLevel0Table(d.imm, &edit, fnum)
 
 	if err == nil {
 		edit.SetPrevLogNumber(0)
 		edit.SetLogNumber(d.logfileNum)
 		err = d.versions.LogAndApply(&edit, &d.mu)
 	}
+
+	d.UnregisterPendingOutput(fnum)
 
 	if err == nil {
 		d.imm = nil
@@ -146,7 +151,6 @@ func (bg *bgWork) doCompaction() {
 				// TODO bg err is already recorded in doCompactionWork
 				d.RecordBackgroundError(err)
 			}
-			// TODO cleanup
 			comp.Release()
 			d.RemoveObsoleteFiles()
 		}

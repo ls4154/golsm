@@ -229,7 +229,7 @@ func (d *dbImpl) RecoverLogFile(logNum uint64, last bool, edit *VersionEdit, max
 
 		if mem.ApproximateMemoryUsage() > d.options.WriteBufferSize {
 			compactions++
-			err := d.WriteLevel0Table(mem, edit)
+			err := d.WriteLevel0Table(mem, edit, d.versions.NewFileNumber())
 			mem = nil
 			if err != nil {
 				recoverErr = err
@@ -245,7 +245,7 @@ func (d *dbImpl) RecoverLogFile(logNum uint64, last bool, edit *VersionEdit, max
 	// TODO reuse log
 
 	if mem != nil {
-		err := d.WriteLevel0Table(mem, edit)
+		err := d.WriteLevel0Table(mem, edit, d.versions.NewFileNumber())
 		if err != nil {
 			return err
 		}
@@ -296,15 +296,14 @@ func (d *dbImpl) newDB() error {
 	return SetCurrentFile(d.env, d.dbname, 1)
 }
 
-func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit) error {
+func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit, fnum uint64) error {
 	util.AssertMutexHeld(&d.mu)
 
 	// TODO stats
 
 	meta := FileMetaData{
-		number: d.versions.NewFileNumber(),
+		number: fnum,
 	}
-	d.pendingOutputs[meta.number] = struct{}{}
 
 	iter := mem.Iterator()
 	defer iter.Close()
@@ -316,7 +315,6 @@ func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit) error {
 	d.mu.Lock()
 
 	d.logger.Printf("Level-0 table #%d: %d bytes %s", meta.number, meta.size, err)
-	delete(d.pendingOutputs, meta.number)
 
 	if err != nil {
 		return err
@@ -502,6 +500,28 @@ func SetCurrentFile(env db.Env, dbname string, num uint64) error {
 	}
 
 	return nil
+}
+
+func (d *dbImpl) RegisterPendingOutput(fnum uint64) {
+	util.AssertMutexHeld(&d.mu)
+
+	util.AssertFunc(func() bool {
+		_, exists := d.pendingOutputs[fnum]
+		return exists == false
+	})
+
+	d.pendingOutputs[fnum] = struct{}{}
+}
+
+func (d *dbImpl) UnregisterPendingOutput(fnum uint64) {
+	util.AssertMutexHeld(&d.mu)
+
+	util.AssertFunc(func() bool {
+		_, exists := d.pendingOutputs[fnum]
+		return exists == true
+	})
+
+	delete(d.pendingOutputs, fnum)
 }
 
 func (d *dbImpl) RemoveObsoleteFiles() {
