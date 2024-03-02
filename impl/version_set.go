@@ -190,6 +190,8 @@ type VersionSet struct {
 
 	compactPointer [NumLevels][]byte
 
+	applyMu sync.Mutex // serialize AppendVersion and AddRecord
+
 	env db.Env
 }
 
@@ -348,8 +350,15 @@ func NewVersionSet(dbname string, icmp *InternalKeyComparator, env db.Env, table
 	return vset
 }
 
-func (vs *VersionSet) LogAndApply(edit *VersionEdit, mu *sync.Mutex) error {
-	util.AssertMutexHeld(mu)
+func (vs *VersionSet) LogAndApply(edit *VersionEdit, dbMu *sync.Mutex) error {
+	util.AssertMutexHeld(dbMu)
+
+	dbMu.Unlock()
+
+	vs.applyMu.Lock()
+	defer vs.applyMu.Unlock()
+
+	dbMu.Lock()
 
 	if edit.hasLogNumber {
 		util.Assert(edit.logNumber >= vs.logNumber)
@@ -371,7 +380,9 @@ func (vs *VersionSet) LogAndApply(edit *VersionEdit, mu *sync.Mutex) error {
 	builder.SaveTo(v)
 	vs.Finalize(v)
 
+	setCurrent := false
 	if vs.descriptorLog == nil {
+		setCurrent = true
 		newManifestFile := DescriptorFileName(vs.dbname, vs.manifestFileNumber)
 		f, err := vs.env.NewWritableFile(newManifestFile)
 		if err != nil {
@@ -386,16 +397,18 @@ func (vs *VersionSet) LogAndApply(edit *VersionEdit, mu *sync.Mutex) error {
 		}
 	}
 
-	mu.Unlock()
+	dbMu.Unlock()
+
 	record := edit.Append(nil)
 	err := vs.descriptorLog.AddRecord(record)
 	if err == nil {
 		err = vs.descriptorFile.Sync()
 	}
-	if err == nil {
+	if err == nil && setCurrent {
 		err = SetCurrentFile(vs.env, vs.dbname, vs.manifestFileNumber)
 	}
-	mu.Lock()
+
+	dbMu.Lock()
 
 	if err != nil {
 		// TODO remove new manifest file if error occurs

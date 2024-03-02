@@ -524,11 +524,21 @@ func (d *dbImpl) UnregisterPendingOutput(fnum uint64) {
 	delete(d.pendingOutputs, fnum)
 }
 
-func (d *dbImpl) RemoveObsoleteFiles() {
+func (d *dbImpl) CleanupObsoleteFiles() {
+	util.AssertMutexHeld(&d.mu)
+
+	filesToDelete := d.FindObsoleteFiles()
+
+	d.mu.Unlock()
+	d.DeleteObsoleteFiles(filesToDelete)
+	d.mu.Lock()
+}
+
+func (d *dbImpl) FindObsoleteFiles() []string {
 	util.AssertMutexHeld(&d.mu)
 
 	if d.bgErr != nil {
-		return
+		return nil
 	}
 
 	live := d.versions.LiveFiles()
@@ -538,11 +548,11 @@ func (d *dbImpl) RemoveObsoleteFiles() {
 
 	fileNames, err := d.env.GetChildren(d.dbname)
 	if err != nil {
-		d.logger.Printf("DeleteObsoleteFiles: %v", err)
-		return
+		d.logger.Printf("FindObsoleteFiles: %v", err)
+		return nil
 	}
 
-	filesToDelete := []string{}
+	ret := []string{}
 
 	for _, fname := range fileNames {
 		ftype, fnum, ok := ParseFileName(fname)
@@ -568,16 +578,18 @@ func (d *dbImpl) RemoveObsoleteFiles() {
 
 		if !keep {
 			// TODO evict table file
-			filesToDelete = append(filesToDelete, fname)
+			ret = append(ret, fname)
 			d.logger.Printf("Delete type=%d #%d", ftype, fnum)
 		}
 	}
 
-	d.mu.Unlock()
-	for _, fname := range filesToDelete {
+	return ret
+}
+
+func (d *dbImpl) DeleteObsoleteFiles(files []string) {
+	for _, fname := range files {
 		_ = d.env.RemoveFile(filepath.Join(d.dbname, fname))
 	}
-	d.mu.Lock()
 }
 
 func (d *dbImpl) RecordBackgroundError(err error) {

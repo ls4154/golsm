@@ -6,22 +6,11 @@ import (
 	"github.com/ls4154/golsm/util"
 )
 
-type bgTaskKind int
-
-const (
-	bgTaskFlush bgTaskKind = iota
-)
-
-type bgTask struct {
-	kind bgTaskKind
-	done chan error
-}
-
 func (d *dbImpl) scheduleFlush() {
 	d.bgWork.ScheduleFlush()
 }
 
-func (d *dbImpl) compactMemTable() {
+func (d *dbImpl) flushMemTable() {
 	util.AssertMutexHeld(&d.mu)
 	util.Assert(d.imm != nil)
 
@@ -41,7 +30,7 @@ func (d *dbImpl) compactMemTable() {
 
 	if err == nil {
 		d.imm = nil
-		d.RemoveObsoleteFiles()
+		d.CleanupObsoleteFiles()
 	} else {
 		d.RecordBackgroundError(err)
 	}
@@ -91,26 +80,26 @@ func (bg *bgWork) flushMain() {
 	defer bg.wg.Done()
 	for range bg.flushCh {
 		bg.doFlush()
+
+		bg.ScheduleCompaction()
+
+		select {
+		case bg.flushDoneCh <- struct{}{}:
+		default:
+		}
 	}
 }
 
 func (bg *bgWork) doFlush() {
 	d := bg.db
 
-	d.logger.Printf("doCompaction start")
+	d.logger.Printf("doFlush start")
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	if d.imm != nil {
-		d.compactMemTable()
-	}
-
-	bg.ScheduleCompaction()
-
-	select {
-	case bg.flushDoneCh <- struct{}{}:
-	default:
+		d.flushMemTable()
 	}
 }
 
@@ -152,7 +141,7 @@ func (bg *bgWork) doCompaction() {
 				d.RecordBackgroundError(err)
 			}
 			comp.Release()
-			d.RemoveObsoleteFiles()
+			d.CleanupObsoleteFiles()
 		}
 
 		if err != nil {
