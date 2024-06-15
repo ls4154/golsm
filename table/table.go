@@ -102,9 +102,13 @@ func ReadBlock(f db.RandomAccessFile, handle *BlockHandle) (*Block, error) {
 	case db.NoCompression:
 		result.contents = buf[:handle.Size]
 	case db.SnappyCompression:
-		panic("snappy compression not implemented yet")
+		uncompressed, err := util.SnappyUncompress(buf[:handle.Size])
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s", db.ErrCorruption, err)
+		}
+		result.contents = uncompressed
 	default:
-		panic(fmt.Sprintf("invalid compression type: %d", compressionType))
+		return nil, fmt.Errorf("%w: unknown compression type %d", db.ErrCorruption, compressionType)
 	}
 
 	return result, nil

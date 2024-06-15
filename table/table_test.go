@@ -14,18 +14,29 @@ func TestTable(t *testing.T) {
 	for _, numEntries := range []int{1, 10, 100, 1000, 10000, 100000} {
 		t.Run(fmt.Sprintf("numEntries=%d", numEntries), func(t *testing.T) {
 			fname := fmt.Sprintf("%06d.ldb", numEntries)
-			writeTable(t, env, fname, numEntries)
+			writeTable(t, env, fname, numEntries, db.NoCompression)
 			readTable(t, env, fname, numEntries)
 		})
 	}
 }
 
-func writeTable(t *testing.T, env db.Env, name string, numEntries int) {
+func TestTableSnappy(t *testing.T) {
+	env := util.DefaultEnv()
+	for _, numEntries := range []int{1, 10, 100, 1000, 10000, 100000} {
+		t.Run(fmt.Sprintf("numEntries=%d", numEntries), func(t *testing.T) {
+			fname := fmt.Sprintf("%06d.ldb", numEntries)
+			writeTable(t, env, fname, numEntries, db.SnappyCompression)
+			readTable(t, env, fname, numEntries)
+		})
+	}
+}
+
+func writeTable(t *testing.T, env db.Env, name string, numEntries int, compression db.CompressionType) {
 	file, err := env.NewWritableFile(name)
 	require.NoError(t, err, "failed to open file")
 	defer file.Close()
 
-	builder := NewTableBuilder(file, util.BytewiseComparator, 4096, db.NoCompression, 16)
+	builder := NewTableBuilder(file, util.BytewiseComparator, 4096, compression, 16)
 
 	for i := 0; i < numEntries; i++ {
 		key, value := getTestKeyValue(i)

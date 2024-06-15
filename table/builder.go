@@ -104,11 +104,21 @@ func (b *TableBuilder) Flush() {
 func (b *TableBuilder) writeBlock(block *BlockBuilder, handle *BlockHandle) {
 	raw := block.Finish()
 
-	blockContents := raw
-	compression := db.NoCompression
-	switch b.compression {
+	var blockContents []byte
+	compression := b.compression
+	switch compression {
+	case db.NoCompression:
+		blockContents = raw
 	case db.SnappyCompression:
-		panic("todo")
+		compressed := util.SnappyCompress(raw)
+		if len(compressed) < len(raw)-(len(raw)/8) {
+			blockContents = compressed
+		} else {
+			blockContents = raw
+			compression = db.NoCompression
+		}
+	default:
+		util.Assert(false)
 	}
 
 	b.writeRawBlock(blockContents, compression, handle)
