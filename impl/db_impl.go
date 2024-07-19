@@ -38,19 +38,17 @@ type dbImpl struct {
 	logger db.Logger
 }
 
-func Open(options *db.Options, dbname string) (db.DB, error) {
-	userCmp := options.Comparator
-	if userCmp == nil {
-		userCmp = util.BytewiseComparator
+func Open(userOpt *db.Options, dbname string) (db.DB, error) {
+	opt, err := validateOption(userOpt)
+	if err != nil {
+		return nil, err
 	}
 
-	opt := &db.Options{}
-	*opt = *options
 	icmp := &InternalKeyComparator{
-		userCmp: userCmp,
+		userCmp: opt.Comparator,
 	}
 	env := util.DefaultEnv()
-	tcache := NewTableCache(dbname, env, options.MaxOpenFiles, icmp)
+	tcache := NewTableCache(dbname, env, opt.MaxOpenFiles, icmp)
 	vset := NewVersionSet(dbname, icmp, env, tcache)
 	snapshots := NewSnapshotList()
 
@@ -78,7 +76,7 @@ func Open(options *db.Options, dbname string) (db.DB, error) {
 	defer db.mu.Unlock()
 
 	edit := VersionEdit{}
-	err := db.recover(&edit)
+	err = db.recover(&edit)
 	if err != nil {
 		return nil, err
 	}
