@@ -29,6 +29,7 @@ type dbImpl struct {
 	log            *log.Writer
 	logfile        db.WritableFile
 	logfileNum     uint64
+	infoLogFile    db.WritableFile
 
 	writeSerializer *writeSerializer
 	bgWork          *bgWork
@@ -48,6 +49,13 @@ func Open(userOpt *db.Options, dbname string) (db.DB, error) {
 		userCmp: opt.Comparator,
 	}
 	env := util.DefaultEnv()
+	_ = env.CreateDir(dbname)
+
+	logger, infoLogFile, err := openInfoLogger(env, dbname, opt.Logger)
+	if err != nil {
+		return nil, err
+	}
+
 	tcache := NewTableCache(dbname, env, opt.MaxOpenFiles, icmp)
 	vset := NewVersionSet(dbname, icmp, env, tcache)
 	snapshots := NewSnapshotList()
@@ -63,7 +71,8 @@ func Open(userOpt *db.Options, dbname string) (db.DB, error) {
 		mem:            nil,
 		env:            env,
 
-		logger: stdlog.Default(),
+		logger:      logger,
+		infoLogFile: infoLogFile,
 	}
 
 	db.writeSerializer = db.newWriteSerializer()
@@ -462,7 +471,26 @@ func (d *dbImpl) Close() error {
 
 	_ = d.logfile.Sync()
 	_ = d.logfile.Close()
+
+	if d.infoLogFile != nil {
+		_ = d.infoLogFile.Flush()
+		_ = d.infoLogFile.Close()
+	}
+
 	return nil
+}
+
+func openInfoLogger(env db.Env, dbname string, logger db.Logger) (db.Logger, db.WritableFile, error) {
+	if logger != nil {
+		return logger, nil, nil
+	}
+
+	f, err := env.NewAppendableFile(InfoLogFileName(dbname))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return stdlog.New(f, "", stdlog.LstdFlags), f, nil
 }
 
 func SetCurrentFile(env db.Env, dbname string, num uint64) error {

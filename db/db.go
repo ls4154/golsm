@@ -46,6 +46,7 @@ type Options struct {
 	MaxOpenFiles         int
 	Compression          CompressionType
 	Comparator           Comparator
+	Logger               Logger
 }
 
 func DefaultOptions() *Options {

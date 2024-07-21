@@ -47,6 +47,10 @@ func LockFileName(dbname string) string {
 	return filepath.Join(dbname, "LOCK")
 }
 
+func InfoLogFileName(dbname string) string {
+	return filepath.Join(dbname, "LOG")
+}
+
 func ParseFileName(filename string) (FileType, uint64, bool) {
 	if filename == "CURRENT" {
 		return FileTypeCurrent, 0, true

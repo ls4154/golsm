@@ -31,6 +31,7 @@ func validateOption(userOpt *db.Options) (*db.Options, error) {
 	} else {
 		opt.Comparator = util.BytewiseComparator
 	}
+	opt.Logger = userOpt.Logger
 
 	return opt, nil
 }

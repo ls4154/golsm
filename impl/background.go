@@ -144,7 +144,7 @@ func (bg *bgWork) doCompaction() {
 			d.CleanupObsoleteFiles()
 		}
 
-		if err != nil {
+		if err == nil {
 			bg.ScheduleCompaction()
 		}
 	}
