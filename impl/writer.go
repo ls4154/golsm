@@ -1,6 +1,7 @@
 package impl
 
 import (
+	"errors"
 	"sync"
 	"time"
 
@@ -168,8 +169,10 @@ func (d *dbImpl) makeRoomForWrite(force bool) error {
 
 	allowDelay := !force
 	for {
-		if d.bgErr != nil {
-			return d.bgErr
+		if d.closed {
+			return errors.New("db closed")
+		} else if bgErr := d.GetBackgroundError(); bgErr != nil {
+			return bgErr
 		} else if allowDelay && d.versions.NumLevelFiles(0) >= L0SlowDownTrigger {
 			d.mu.Unlock()
 			time.Sleep(time.Millisecond)

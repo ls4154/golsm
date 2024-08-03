@@ -34,7 +34,8 @@ type dbImpl struct {
 	writeSerializer *writeSerializer
 	bgWork          *bgWork
 
-	bgErr error
+	closed bool
+	bgErr  error
 
 	logger db.Logger
 }
@@ -111,8 +112,8 @@ func Open(userOpt *db.Options, dbname string) (db.DB, error) {
 		return nil, err
 	}
 
-	// TODO remove obsolete files
-	// TODO maybe sched comp
+	db.CleanupObsoleteFiles()
+	db.scheduleCompaction()
 
 	return db, nil
 }
@@ -466,8 +467,12 @@ func (d *dbImpl) GetSnapshot() db.Snapshot {
 func (d *dbImpl) Close() error {
 	d.logger.Printf("Closing...")
 
-	d.writeSerializer.Close()
+	d.mu.Lock()
+	d.closed = true
+	d.mu.Unlock()
+
 	d.bgWork.Close()
+	d.writeSerializer.Close()
 
 	_ = d.logfile.Sync()
 	_ = d.logfile.Close()
@@ -563,7 +568,7 @@ func (d *dbImpl) CleanupObsoleteFiles() {
 func (d *dbImpl) FindObsoleteFiles() []string {
 	util.AssertMutexHeld(&d.mu)
 
-	if d.bgErr != nil {
+	if d.GetBackgroundError() != nil {
 		return nil
 	}
 
@@ -625,4 +630,9 @@ func (d *dbImpl) RecordBackgroundError(err error) {
 		d.bgErr = err
 		// TODO signal?
 	}
+}
+
+func (d *dbImpl) GetBackgroundError() error {
+	util.AssertMutexHeld(&d.mu)
+	return d.bgErr
 }

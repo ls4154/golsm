@@ -10,7 +10,11 @@ func (d *dbImpl) scheduleFlush() {
 	d.bgWork.ScheduleFlush()
 }
 
-func (d *dbImpl) flushMemTable() {
+func (d *dbImpl) scheduleCompaction() {
+	d.bgWork.ScheduleCompaction()
+}
+
+func (d *dbImpl) flushMemTable() error {
 	util.AssertMutexHeld(&d.mu)
 	util.Assert(d.imm != nil)
 
@@ -34,6 +38,8 @@ func (d *dbImpl) flushMemTable() {
 	} else {
 		d.RecordBackgroundError(err)
 	}
+
+	return err
 }
 
 type bgWork struct {
@@ -44,6 +50,8 @@ type bgWork struct {
 	flushDoneCh chan struct{}
 	compDoneCh  chan struct{}
 	wg          sync.WaitGroup
+
+	closedCh chan struct{}
 }
 
 func (d *dbImpl) newBgWork() *bgWork {
@@ -53,6 +61,8 @@ func (d *dbImpl) newBgWork() *bgWork {
 		compCh:      make(chan struct{}, 1),
 		flushDoneCh: make(chan struct{}, 1),
 		compDoneCh:  make(chan struct{}, 1),
+
+		closedCh: make(chan struct{}),
 	}
 }
 
@@ -78,19 +88,26 @@ func (bg *bgWork) Run() {
 
 func (bg *bgWork) flushMain() {
 	defer bg.wg.Done()
-	for range bg.flushCh {
-		bg.doFlush()
 
-		bg.ScheduleCompaction()
-
+	for {
 		select {
-		case bg.flushDoneCh <- struct{}{}:
-		default:
+		case <-bg.closedCh:
+			return
+		case <-bg.flushCh:
+			err := bg.doFlush()
+			if err == nil {
+				bg.ScheduleCompaction()
+			}
+
+			select {
+			case bg.flushDoneCh <- struct{}{}:
+			default:
+			}
 		}
 	}
 }
 
-func (bg *bgWork) doFlush() {
+func (bg *bgWork) doFlush() error {
 	d := bg.db
 
 	d.logger.Printf("doFlush start")
@@ -98,24 +115,48 @@ func (bg *bgWork) doFlush() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.imm != nil {
-		d.flushMemTable()
+	if bgErr := d.GetBackgroundError(); bgErr != nil {
+		return bgErr
 	}
+
+	var err error
+	if d.imm != nil {
+		err = d.flushMemTable()
+	}
+
+	return err
 }
 
 // for writeSerializer only
 func (bg *bgWork) writerWaitForFlushDone() {
-	<-bg.flushDoneCh
+	select {
+	case <-bg.flushDoneCh:
+	case <-bg.closedCh:
+	}
 }
 
 func (bg *bgWork) compactionMain() {
 	defer bg.wg.Done()
-	for range bg.compCh {
-		bg.doCompaction()
+
+	for {
+		select {
+		case <-bg.closedCh:
+			return
+		case <-bg.compCh:
+			err := bg.doCompaction()
+			if err == nil {
+				bg.ScheduleCompaction()
+			}
+
+			select {
+			case bg.compDoneCh <- struct{}{}:
+			default:
+			}
+		}
 	}
 }
 
-func (bg *bgWork) doCompaction() {
+func (bg *bgWork) doCompaction() error {
 	d := bg.db
 
 	d.logger.Printf("doCompaction start")
@@ -123,10 +164,14 @@ func (bg *bgWork) doCompaction() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	if bgErr := d.GetBackgroundError(); bgErr != nil {
+		return bgErr
+	}
+
 	comp := d.versions.PickCompaction()
 	d.logger.Printf("picked compaction %+v", comp)
+	var err error
 	if comp != nil {
-		var err error
 		if comp.IsTrivial() {
 			err = d.doTrivialMove(comp)
 			if err != nil {
@@ -143,25 +188,20 @@ func (bg *bgWork) doCompaction() {
 			comp.Release()
 			d.CleanupObsoleteFiles()
 		}
-
-		if err == nil {
-			bg.ScheduleCompaction()
-		}
 	}
 
-	select {
-	case bg.compDoneCh <- struct{}{}:
-	default:
-	}
+	return err
 }
 
 // for writeSerializer only
 func (bg *bgWork) writerWaitForCompactionDone() {
-	<-bg.compDoneCh
+	select {
+	case <-bg.compDoneCh:
+	case <-bg.closedCh:
+	}
 }
 
 func (bg *bgWork) Close() {
-	close(bg.flushCh)
-	close(bg.compCh)
+	close(bg.closedCh)
 	bg.wg.Wait()
 }
