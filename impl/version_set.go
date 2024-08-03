@@ -1,6 +1,7 @@
 package impl
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/ls4154/golsm/db"
 	"github.com/ls4154/golsm/log"
+	"github.com/ls4154/golsm/table"
 	"github.com/ls4154/golsm/util"
 )
 
@@ -120,7 +122,9 @@ func (v *Version) AddIterators(iters *[]db.Iterator) error {
 	}
 
 	for lv := 1; lv < NumLevels; lv++ {
-		// TODO
+		if len(v.files[lv]) > 0 {
+			*iters = append(*iters, v.vset.newConcatIterator(v.files[lv]))
+		}
 	}
 
 	return nil
@@ -224,15 +228,16 @@ func (c *Compaction) NewInputIterator() (db.Iterator, error) {
 	for i := 0; i < 2; i++ {
 		level := c.level + i
 
-		// TODO concat iter for L1+
-		_ = level
-
-		for _, f := range c.inputs[i] {
-			it, err := vset.tableCache.NewIterator(f.number, f.size)
-			if err != nil {
-				return nil, err
+		if level == 0 {
+			for _, f := range c.inputs[i] {
+				it, err := vset.tableCache.NewIterator(f.number, f.size)
+				if err != nil {
+					return nil, err
+				}
+				iters = append(iters, it)
 			}
-			iters = append(iters, it)
+		} else {
+			iters = append(iters, vset.newConcatIterator(c.inputs[i]))
 		}
 	}
 
@@ -819,4 +824,14 @@ func findSmallestBoundaryFile(icmp *InternalKeyComparator, files []*FileMetaData
 	}
 
 	return ret
+}
+
+func (vs *VersionSet) newConcatIterator(files []*FileMetaData) db.Iterator {
+	return table.NewTwoLevelIterator(newLevelFileNumIterator(vs.icmp, files), vs.newIteratorFromFileNum)
+}
+
+func (vs *VersionSet) newIteratorFromFileNum(fileValue []byte) (db.Iterator, error) {
+	fnum := binary.LittleEndian.Uint64(fileValue[0:])
+	fsize := binary.LittleEndian.Uint64(fileValue[8:])
+	return vs.tableCache.NewIterator(fnum, fsize)
 }
