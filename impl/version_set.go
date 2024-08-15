@@ -44,20 +44,13 @@ func (v *Version) Unref() {
 }
 
 func (v *Version) Get(lkey *LookupKey) ([]byte, error) {
-	l0files := append([]*FileMetaData{}, v.files[0]...)
-	sort.Slice(l0files, func(i, j int) bool {
-		return l0files[i].number > l0files[j].number
-	})
-
-	// TODO search overlapped table only
-
 	icmp := v.vset.icmp
 
 	done := false
 	deleted := false
 	value := []byte{}
 	var fnErr error
-	handleFn := func(k, v []byte) {
+	handleResult := func(k, v []byte) {
 		parsedKey, err := ParseInternalKey(k)
 		if err != nil {
 			done = true
@@ -74,8 +67,23 @@ func (v *Version) Get(lkey *LookupKey) ([]byte, error) {
 		}
 	}
 
+	ukey := lkey.UserKey()
+	ucmp := icmp.userCmp
+
+	l0files := make([]*FileMetaData, 0, len(v.files[0]))
+	for _, f := range v.files[0] {
+		if ucmp.Compare(ukey, ExtractUserKey(f.smallest)) >= 0 && ucmp.Compare(ukey, ExtractUserKey(f.largest)) <= 0 {
+			l0files = append(l0files, f)
+		}
+	}
+
+	// from newest to oldest
+	sort.Slice(l0files, func(i, j int) bool {
+		return l0files[i].number > l0files[j].number
+	})
+
 	for _, f := range l0files {
-		err := v.vset.tableCache.Get(f.number, f.size, lkey.Key(), handleFn)
+		err := v.vset.tableCache.Get(f.number, f.size, lkey.Key(), handleResult)
 		if err != nil {
 			return nil, err
 		}
@@ -90,13 +98,28 @@ func (v *Version) Get(lkey *LookupKey) ([]byte, error) {
 		}
 	}
 
+	ikey := lkey.Key()
 	for lv := 1; lv < NumLevels; lv++ {
-		for _, f := range v.files[lv] {
-			err := v.vset.tableCache.Get(f.number, f.size, lkey.Key(), handleFn)
-			if err != nil {
-				return nil, err
-			}
+		levelFiles := v.files[lv]
+		if len(levelFiles) == 0 {
+			continue
 		}
+
+		idx := lowerBoundFiles(icmp, levelFiles, ikey)
+		if idx >= len(levelFiles) {
+			continue
+		}
+
+		f := levelFiles[idx]
+		if ucmp.Compare(ukey, ExtractUserKey(f.smallest)) < 0 {
+			continue
+		}
+
+		err := v.vset.tableCache.Get(f.number, f.size, lkey.Key(), handleResult)
+		if err != nil {
+			return nil, err
+		}
+
 		if done {
 			if fnErr != nil {
 				return nil, fnErr
@@ -717,7 +740,7 @@ func (vs *VersionSet) setupOtherInputs(c *Compaction) {
 
 func (vs *VersionSet) NewBuilder(v *Version) *VersionBuilder {
 	builder := &VersionBuilder{
-		vset: v.vset,
+		vset: vs,
 		base: v,
 	}
 
@@ -824,6 +847,25 @@ func findSmallestBoundaryFile(icmp *InternalKeyComparator, files []*FileMetaData
 	}
 
 	return ret
+}
+
+func lowerBoundFiles(icmp db.Comparator, files []*FileMetaData, key []byte) int {
+	l := 0
+	r := len(files)
+
+	for l < r {
+		m := (l + r) / 2
+		if icmp.Compare(files[m].largest, key) < 0 {
+			l = m + 1
+		} else {
+			r = m
+		}
+	}
+
+	util.Assert(l == r)
+	util.Assert(l <= len(files))
+
+	return l
 }
 
 func (vs *VersionSet) newConcatIterator(files []*FileMetaData) db.Iterator {

@@ -44,7 +44,7 @@ func (it *levelFileNumIterator) Prev() {
 }
 
 func (it *levelFileNumIterator) Seek(target []byte) {
-	it.idx = indexFile(it.icmp, it.files, target)
+	it.idx = lowerBoundFiles(it.icmp, it.files, target)
 }
 
 func (it *levelFileNumIterator) SeekToFirst() {
@@ -63,19 +63,4 @@ func (it *levelFileNumIterator) Value() []byte {
 	binary.LittleEndian.PutUint64(it.valueBuf[0:], it.files[it.idx].number)
 	binary.LittleEndian.PutUint64(it.valueBuf[8:], it.files[it.idx].size)
 	return it.valueBuf[:]
-}
-
-func indexFile(icmp db.Comparator, files []*FileMetaData, key []byte) int {
-	l := 0
-	r := len(files)
-
-	for l < r {
-		m := (l + r) / 2
-		if icmp.Compare(files[m].largest, key) < 0 {
-			l = m + 1
-		} else {
-			r = m
-		}
-	}
-	return r
 }
