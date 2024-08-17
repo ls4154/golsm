@@ -110,8 +110,6 @@ func (bg *bgWork) flushMain() {
 func (bg *bgWork) doFlush() error {
 	d := bg.db
 
-	d.logger.Printf("doFlush start")
-
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -143,8 +141,8 @@ func (bg *bgWork) compactionMain() {
 		case <-bg.closedCh:
 			return
 		case <-bg.compCh:
-			err := bg.doCompaction()
-			if err == nil {
+			compacted, err := bg.doCompaction()
+			if err == nil && compacted {
 				bg.ScheduleCompaction()
 			}
 
@@ -156,41 +154,40 @@ func (bg *bgWork) compactionMain() {
 	}
 }
 
-func (bg *bgWork) doCompaction() error {
+func (bg *bgWork) doCompaction() (bool, error) {
 	d := bg.db
-
-	d.logger.Printf("doCompaction start")
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	if bgErr := d.GetBackgroundError(); bgErr != nil {
-		return bgErr
+		return false, bgErr
 	}
 
 	comp := d.versions.PickCompaction()
-	d.logger.Printf("picked compaction %+v", comp)
-	var err error
-	if comp != nil {
-		if comp.IsTrivial() {
-			err = d.doTrivialMove(comp)
-			if err != nil {
-				// TODO bg err is already recorded in doTrivialMove
-				d.RecordBackgroundError(err)
-			}
-			comp.Release()
-		} else {
-			err = d.doCompactionWork(comp)
-			if err != nil {
-				// TODO bg err is already recorded in doCompactionWork
-				d.RecordBackgroundError(err)
-			}
-			comp.Release()
-			d.CleanupObsoleteFiles()
-		}
+	if comp == nil {
+		return false, nil
 	}
 
-	return err
+	var err error
+	if comp.IsTrivial() {
+		err = d.doTrivialMove(comp)
+		if err != nil {
+			// TODO bg err is already recorded in doTrivialMove
+			d.RecordBackgroundError(err)
+		}
+		comp.Release()
+	} else {
+		err = d.doCompactionWork(comp)
+		if err != nil {
+			// TODO bg err is already recorded in doCompactionWork
+			d.RecordBackgroundError(err)
+		}
+		comp.Release()
+		d.CleanupObsoleteFiles()
+	}
+
+	return true, err
 }
 
 // for writeSerializer only

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/ls4154/golsm/db"
 	"github.com/ls4154/golsm/log"
@@ -308,6 +309,7 @@ func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit, fnum uint64)
 	util.AssertMutexHeld(&d.mu)
 
 	// TODO stats
+	startTime := time.Now()
 
 	meta := FileMetaData{
 		number: fnum,
@@ -337,6 +339,9 @@ func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit, fnum uint64)
 	// TODO pick level
 
 	edit.AddFile(level, meta.number, meta.size, meta.smallest, meta.largest)
+
+	elapsed := time.Now().Sub(startTime)
+	d.logger.Printf("flush time: %s", elapsed)
 
 	return nil
 }
