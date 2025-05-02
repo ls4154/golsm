@@ -91,5 +91,5 @@ func (tc *TableCache) findTable(num, size uint64) (*util.LRUHandle[tableAndFile]
 	return tc.cache.Insert(key, tableAndFile{
 		file:  f,
 		table: tbl,
-	}), nil
+	}, 1), nil
 }

@@ -14,12 +14,13 @@ type LRUCache[T any] struct {
 }
 
 type LRUHandle[T any] struct {
-	value T
-	next  *LRUHandle[T]
-	prev  *LRUHandle[T]
-	ref   int
-	key   []byte
-	cache *LRUCache[T]
+	value   T
+	next    *LRUHandle[T]
+	prev    *LRUHandle[T]
+	ref     int
+	charge  int
+	key     string
+	inCache bool
 }
 
 func (h LRUHandle[T]) Value() T {
@@ -57,7 +58,7 @@ func (c *LRUCache[T]) Lookup(key []byte) *LRUHandle[T] {
 	return nil
 }
 
-func (c *LRUCache[T]) Insert(key []byte, value T) *LRUHandle[T] {
+func (c *LRUCache[T]) Insert(key []byte, value T, charge int) *LRUHandle[T] {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -65,29 +66,31 @@ func (c *LRUCache[T]) Insert(key []byte, value T) *LRUHandle[T] {
 	if existing, ok := c.table[keyStr]; ok {
 		lruRemove(existing)
 		delete(c.table, keyStr)
-		c.usage--
+		c.usage -= existing.charge
+		existing.inCache = false
+		c.unref(existing)
 	}
 
 	h := &LRUHandle[T]{
-		value: value,
-		ref:   2,
-		key:   key,
-		cache: c,
+		value:   value,
+		ref:     2,
+		charge:  charge,
+		key:     keyStr,
+		inCache: true,
 	}
 	lruAppend(&c.inUse, h)
 
 	c.table[keyStr] = h
-	c.usage++
+	c.usage += h.charge
 
 	for c.usage > c.cap && c.lru.next != &c.lru {
 		old := c.lru.next
+		Assert(old.ref == 1)
 		lruRemove(old)
-		delete(c.table, string(old.key))
-		c.usage--
-		old.ref--
-		if old.ref == 0 && c.onEvict != nil {
-			c.onEvict(old.key, &old.value)
-		}
+		delete(c.table, old.key)
+		c.usage -= old.charge
+		old.inCache = false
+		c.unref(old)
 	}
 
 	return h
@@ -101,13 +104,14 @@ func (c *LRUCache[T]) Release(h *LRUHandle[T]) {
 
 func (c *LRUCache[T]) unref(h *LRUHandle[T]) {
 	h.ref--
-	if h.ref == 1 {
-		lruRemove(h)
-		lruAppend(&h.cache.lru, h)
-	} else if h.ref == 0 {
-		if h.cache.onEvict != nil {
-			h.cache.onEvict(h.key, &h.value)
+	if h.ref == 0 {
+		Assert(!h.inCache)
+		if c.onEvict != nil {
+			c.onEvict([]byte(h.key), &h.value)
 		}
+	} else if h.inCache && h.ref == 1 {
+		lruRemove(h)
+		lruAppend(&c.lru, h)
 	}
 }
 
