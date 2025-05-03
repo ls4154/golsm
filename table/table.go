@@ -14,6 +14,8 @@ type Table struct {
 	cmp  db.Comparator
 
 	indexBlock *Block
+	cacheID    uint64
+	blockCache *BlockCache
 }
 
 func (t *Table) Close() error {
@@ -24,7 +26,11 @@ func (t *Table) Close() error {
 	return nil
 }
 
-func OpenTable(file db.RandomAccessFile, size uint64, cmp db.Comparator) (*Table, error) {
+func (t *Table) GetCacheID() uint64 {
+	return t.cacheID
+}
+
+func OpenTable(file db.RandomAccessFile, size uint64, cmp db.Comparator, bcache *BlockCache, cacheID uint64) (*Table, error) {
 	// Footer
 	var buf [FooterLength]byte
 	n, err := file.ReadAt(buf[:], int64(size)-FooterLength)
@@ -52,6 +58,8 @@ func OpenTable(file db.RandomAccessFile, size uint64, cmp db.Comparator) (*Table
 		cmp:  cmp,
 
 		indexBlock: indexBlock,
+		cacheID:    cacheID,
+		blockCache: bcache,
 	}, nil
 }
 
@@ -64,12 +72,32 @@ func (t *Table) NewBlockIteratorFromIndex(indexValue []byte) (db.Iterator, error
 	if err != nil {
 		return nil, err
 	}
-	block, err := ReadBlock(t.file, &handle)
-	if err != nil {
-		return nil, err
+
+	var block *Block
+	var blockRelease func()
+	if t.blockCache != nil {
+		bcacheKey := BuildBlockCacheKey(t.GetCacheID(), handle.Offset)
+		block, blockRelease = t.blockCache.Lookup(bcacheKey)
+		if block == nil {
+			block, err = ReadBlock(t.file, &handle)
+			if err != nil {
+				return nil, err
+			}
+			blockRelease = t.blockCache.Insert(bcacheKey, block)
+		}
+	} else {
+		block, err = ReadBlock(t.file, &handle)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	return block.NewBlockIterator(t.cmp), nil
+	var it db.Iterator = block.NewBlockIterator(t.cmp)
+	if blockRelease != nil {
+		it = util.NewCleanupIterator(it, blockRelease)
+	}
+
+	return it, nil
 }
 
 func ReadBlock(f db.RandomAccessFile, handle *BlockHandle) (*Block, error) {
@@ -95,23 +123,23 @@ func ReadBlock(f db.RandomAccessFile, handle *BlockHandle) (*Block, error) {
 		}
 	}
 
-	result := &Block{}
+	var contents []byte
 
 	compressionType := db.CompressionType(buf[handle.Size])
 	switch compressionType {
 	case db.NoCompression:
-		result.contents = buf[:handle.Size]
+		contents = buf[:handle.Size]
 	case db.SnappyCompression:
 		uncompressed, err := util.SnappyUncompress(buf[:handle.Size])
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s", db.ErrCorruption, err)
 		}
-		result.contents = uncompressed
+		contents = uncompressed
 	default:
 		return nil, fmt.Errorf("%w: unknown compression type %d", db.ErrCorruption, compressionType)
 	}
 
-	return result, nil
+	return NewBlock(contents)
 }
 
 func (t *Table) InternalGet(key []byte, handleFn func(k, v []byte)) error {

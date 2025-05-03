@@ -40,6 +40,10 @@ func (b *Block) NumRestarts() uint32 {
 	return binary.LittleEndian.Uint32(b.contents[len(b.contents)-4:])
 }
 
+func (b *Block) Size() int {
+	return len(b.contents)
+}
+
 func (b *Block) Data() []byte {
 	arrLen := b.NumRestarts() * 4
 	return b.contents[:len(b.contents)-4-int(arrLen)]

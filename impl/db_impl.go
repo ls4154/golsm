@@ -12,6 +12,7 @@ import (
 
 	"github.com/ls4154/golsm/db"
 	"github.com/ls4154/golsm/log"
+	"github.com/ls4154/golsm/table"
 	"github.com/ls4154/golsm/util"
 )
 
@@ -58,7 +59,11 @@ func Open(userOpt *db.Options, dbname string) (db.DB, error) {
 		return nil, err
 	}
 
-	tcache := NewTableCache(dbname, env, opt.MaxOpenFiles, icmp)
+	var bcache *table.BlockCache
+	if opt.BlockCacheSize > 0 {
+		bcache = table.NewBlockCache(opt.BlockCacheSize)
+	}
+	tcache := NewTableCache(dbname, env, opt.MaxOpenFiles, icmp, bcache)
 	vset := NewVersionSet(dbname, icmp, env, tcache)
 	snapshots := NewSnapshotList()
 

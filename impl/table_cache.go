@@ -2,7 +2,7 @@ package impl
 
 import (
 	"encoding/binary"
-	"sync"
+	"sync/atomic"
 
 	"github.com/ls4154/golsm/db"
 	"github.com/ls4154/golsm/table"
@@ -19,13 +19,15 @@ type TableCache struct {
 	env    db.Env
 	cmp    db.Comparator
 
-	cache *util.LRUCache[tableAndFile]
-	mu    sync.Mutex
+	lru *util.LRUCache[tableAndFile]
+
+	bcache  *table.BlockCache
+	cacheID atomic.Uint64
 }
 
-func NewTableCache(dbname string, env db.Env, size int, cmp db.Comparator) *TableCache {
-	cache := util.NewLRUCache[tableAndFile](size)
-	cache.SetOnEvict(func(_ []byte, v *tableAndFile) {
+func NewTableCache(dbname string, env db.Env, size int, cmp db.Comparator, bcache *table.BlockCache) *TableCache {
+	lru := util.NewLRUCache[tableAndFile](size)
+	lru.SetOnEvict(func(_ []byte, v *tableAndFile) {
 		v.table.Close()
 		v.file.Close()
 	})
@@ -34,7 +36,8 @@ func NewTableCache(dbname string, env db.Env, size int, cmp db.Comparator) *Tabl
 		dbname: dbname,
 		env:    env,
 		cmp:    cmp,
-		cache:  cache,
+		lru:    lru,
+		bcache: bcache,
 	}
 }
 
@@ -43,7 +46,7 @@ func (tc *TableCache) Get(num, size uint64, key []byte, handleFn func(k, v []byt
 	if err != nil {
 		return err
 	}
-	defer tc.cache.Release(handle)
+	defer tc.lru.Release(handle)
 
 	tbl := handle.Value().table
 	return tbl.InternalGet(key, handleFn)
@@ -57,18 +60,15 @@ func (tc *TableCache) NewIterator(num, size uint64) (db.Iterator, error) {
 	tbl := handle.Value().table
 	iter := tbl.NewIterator()
 	return newCleanupIterator(iter, func() {
-		tc.cache.Release(handle)
+		tc.lru.Release(handle)
 	}), nil
 }
 
 func (tc *TableCache) findTable(num, size uint64) (*util.LRUHandle[tableAndFile], error) {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-
 	key := make([]byte, 8)
 	binary.LittleEndian.PutUint64(key, num)
 
-	if h := tc.cache.Lookup(key); h != nil {
+	if h := tc.lru.Lookup(key); h != nil {
 		return h, nil
 	}
 
@@ -82,13 +82,14 @@ func (tc *TableCache) findTable(num, size uint64) (*util.LRUHandle[tableAndFile]
 		}
 	}
 
-	tbl, err := table.OpenTable(f, size, tc.cmp)
+	cacheID := tc.cacheID.Add(1)
+	tbl, err := table.OpenTable(f, size, tc.cmp, tc.bcache, cacheID)
 	if err != nil {
 		_ = f.Close()
 		return nil, err
 	}
 
-	return tc.cache.Insert(key, tableAndFile{
+	return tc.lru.Insert(key, tableAndFile{
 		file:  f,
 		table: tbl,
 	}, 1), nil

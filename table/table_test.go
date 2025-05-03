@@ -61,7 +61,7 @@ func readTable(t *testing.T, env db.Env, name string, numEntries int) {
 	size, err := env.GetFileSize(name)
 	require.NoError(t, err, "failed to get file size")
 
-	tbl, err := OpenTable(file, size, util.BytewiseComparator)
+	tbl, err := OpenTable(file, size, util.BytewiseComparator, nil, 0)
 	require.NoError(t, err, "failed to open table")
 
 	it := tbl.NewIterator()

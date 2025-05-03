@@ -44,6 +44,7 @@ type Options struct {
 	MaxFileSize          uint64
 	WriteBufferSize      int
 	MaxOpenFiles         int
+	BlockCacheSize       int
 	Compression          CompressionType
 	Comparator           Comparator
 	Logger               Logger
@@ -56,6 +57,7 @@ func DefaultOptions() *Options {
 		MaxFileSize:          4 * 1024 * 1024,
 		WriteBufferSize:      4 * 1024 * 1024,
 		MaxOpenFiles:         1000,
+		BlockCacheSize:       64 << 20,
 		Compression:          NoCompression,
 	}
 }

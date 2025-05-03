@@ -20,6 +20,7 @@ func validateOption(userOpt *db.Options) (*db.Options, error) {
 	opt.MaxFileSize = clipToRange(userOpt.MaxFileSize, 1<<20, 1<<30)
 	opt.WriteBufferSize = clipToRange(userOpt.WriteBufferSize, 64<<10, 1<<30)
 	opt.MaxOpenFiles = clipToRange(userOpt.MaxOpenFiles, 100, 50000)
+	opt.BlockCacheSize = userOpt.BlockCacheSize
 
 	if userOpt.Compression != db.NoCompression && userOpt.Compression != db.SnappyCompression {
 		return nil, fmt.Errorf("%w: invalid compression type", db.ErrInvalidArgument)
