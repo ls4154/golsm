@@ -16,10 +16,14 @@ type writer struct {
 	resultCh chan error
 }
 
+// writeSerializer runs a single goroutine that collects concurrent writes and
+// applies them as a group, reducing log I/O overhead.
 type writeSerializer struct {
-	apply      func(*WriteBatchImpl, bool) error
-	writerCh   chan *writer
-	wg         sync.WaitGroup
+	apply    func(*WriteBatchImpl, bool) error
+	writerCh chan *writer
+	wg       sync.WaitGroup
+	// lastWriter holds a writer dequeued but not included in the current batch
+	// (sync mismatch or size limit) to be the first writer in the next batch.
 	lastWriter *writer
 	tempBatch  *WriteBatchImpl
 }
@@ -108,6 +112,7 @@ func (ws *writeSerializer) fetchWriters() []*writer {
 			if !ok {
 				return writers
 			}
+			// Do not mix sync and non-sync writers in the same batch.
 			if r.options.Sync != first.options.Sync {
 				ws.lastWriter = r
 				return writers
@@ -150,6 +155,8 @@ func (d *dbImpl) applyBatch(batch *WriteBatchImpl, sync bool) error {
 	lastSeq := d.versions.GetLastSequence()
 	batch.setSequence(lastSeq + 1)
 
+	// writeSerializer guarantees only one applyBatch runs at a time,
+	// so releasing the mutex here is safe.
 	d.mu.Unlock()
 	err = d.log.AddRecord(batch.contents())
 	if err == nil && sync {

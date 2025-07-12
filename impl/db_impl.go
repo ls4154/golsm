@@ -17,21 +17,26 @@ import (
 )
 
 type dbImpl struct {
-	dbname         string
-	options        *db.Options
-	icmp           *InternalKeyComparator
-	versions       *VersionSet
-	tableCache     *TableCache
-	snapshots      *SnapshotList
+	dbname     string
+	options    *db.Options
+	icmp       *InternalKeyComparator
+	versions   *VersionSet
+	tableCache *TableCache
+	snapshots  *SnapshotList
+	// tracks file numbers currently being written by compaction or flush
+	// protecting them from being deleted by obsolete file cleanup
+	// before they are registered in the version set.
 	pendingOutputs map[uint64]struct{}
-	mem            *MemTable
-	imm            *MemTable
-	mu             sync.Mutex
-	env            db.Env
-	log            *log.Writer
-	logfile        db.WritableFile
-	logfileNum     uint64
-	infoLogFile    db.WritableFile
+	// current active memtable
+	mem *MemTable
+	// immutable memtable being flushed to level-0
+	imm         *MemTable
+	mu          sync.Mutex
+	env         db.Env
+	log         *log.Writer
+	logfile     db.WritableFile
+	logfileNum  uint64
+	infoLogFile db.WritableFile
 
 	writeSerializer *writeSerializer
 	bgWork          *bgWork

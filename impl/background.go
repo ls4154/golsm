@@ -45,8 +45,12 @@ func (d *dbImpl) flushMemTable() error {
 type bgWork struct {
 	db *dbImpl
 
-	flushCh     chan struct{}
-	compCh      chan struct{}
+	// Buffered channels of size 1: a pending signal already in the channel
+	// means work is scheduled, so duplicate schedules are dropped.
+	flushCh chan struct{}
+	compCh  chan struct{}
+	// Done channels carry a signal that at least one flush/compaction has
+	// completed, used to unblock writers waiting for space.
 	flushDoneCh chan struct{}
 	compDoneCh  chan struct{}
 	wg          sync.WaitGroup
@@ -96,6 +100,7 @@ func (bg *bgWork) flushMain() {
 		case <-bg.flushCh:
 			err := bg.doFlush()
 			if err == nil {
+				// Flush produces new L0 files which may trigger compaction.
 				bg.ScheduleCompaction()
 			}
 

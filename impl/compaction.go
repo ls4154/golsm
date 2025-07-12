@@ -74,16 +74,21 @@ func (d *dbImpl) doCompactionWork(c *Compaction) error {
 			lastSequenceForKey = MaxSequenceNumber
 		} else {
 			if !hasCurUserKey || d.icmp.userCmp.Compare(ikey.UserKey, curUserKey) != 0 {
-				// new user key
+				// new user key; set to MaxSequenceNumber so the first
+				// (newest) entry is never dropped.
 				hasCurUserKey = true
 				curUserKey = append(curUserKey[:0], ikey.UserKey...)
 				lastSequenceForKey = MaxSequenceNumber
 			}
 
 			if lastSequenceForKey <= smallestSnapshot {
+				// A newer version of this key is already visible to all
+				// snapshots, so this older entry is redundant.
 				drop = true
 			} else if ikey.Type == TypeDeletion && ikey.Sequence <= smallestSnapshot &&
 				keyNotExistsInHigherLevel(ikey.UserKey, d.icmp.userCmp, c.inputVersion, c.level+2, &levelPtrs) {
+				// Tombstone is below all snapshots and has no copies in
+				// higher levels, so it can be dropped safely.
 				drop = true
 			}
 
@@ -246,6 +251,9 @@ func (d *dbImpl) CleaunupCompaction(builder *table.TableBuilder, file db.Writabl
 	}
 }
 
+// keyNotExistsInHigherLevel checks whether userKey is absent from all levels
+// >= checkFrom. levelPtrs is advanced monotonically as compaction iterates
+// in key order, keeping each per-level scan at O(n) overall.
 func keyNotExistsInHigherLevel(userKey []byte, userCmp db.Comparator, v *Version, checkFrom int, levelPtrs *[NumLevels]int) bool {
 	for lv := checkFrom; lv < NumLevels; lv++ {
 		files := v.files[lv]

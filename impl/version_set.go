@@ -70,6 +70,7 @@ func (v *Version) Get(lkey *LookupKey) ([]byte, error) {
 	ukey := lkey.UserKey()
 	ucmp := icmp.userCmp
 
+	// Level-0 files may overlap each other, so we must check all of them
 	l0files := make([]*FileMetaData, 0, len(v.files[0]))
 	for _, f := range v.files[0] {
 		if ucmp.Compare(ukey, ExtractUserKey(f.smallest)) >= 0 && ucmp.Compare(ukey, ExtractUserKey(f.largest)) <= 0 {
@@ -77,7 +78,7 @@ func (v *Version) Get(lkey *LookupKey) ([]byte, error) {
 		}
 	}
 
-	// from newest to oldest
+	// search from newest to oldest to respect sequence number ordering
 	sort.Slice(l0files, func(i, j int) bool {
 		return l0files[i].number > l0files[j].number
 	})
@@ -98,6 +99,7 @@ func (v *Version) Get(lkey *LookupKey) ([]byte, error) {
 		}
 	}
 
+	// Level 1+ files are non-overlapping and sorted, so binary search suffices.
 	ikey := lkey.Key()
 	for lv := 1; lv < NumLevels; lv++ {
 		levelFiles := v.files[lv]
@@ -381,6 +383,7 @@ func NewVersionSet(dbname string, icmp *InternalKeyComparator, env db.Env, table
 func (vs *VersionSet) LogAndApply(edit *VersionEdit, dbMu *sync.Mutex) error {
 	util.AssertMutexHeld(dbMu)
 
+	// Release dbMu before acquiring applyMu to prevent deadlock
 	dbMu.Unlock()
 
 	vs.applyMu.Lock()
@@ -631,7 +634,8 @@ func (vs *VersionSet) Finalize(v *Version) {
 	bestLevel := -1
 	bestScore := float64(-1)
 
-	for level := 0; level < NumLevels; level++ {
+	// last level cannot be picked as a compaction source
+	for level := 0; level < NumLevels-1; level++ {
 		score := float64(0)
 		if level == 0 {
 			score = float64(len(v.files[level])) / L0CompactionTrigger
@@ -688,7 +692,7 @@ func (vs *VersionSet) setupBaseInputs(c *Compaction) {
 
 	util.Assert(len(files) > 0)
 
-	// select file using compactPointer for round-robin progress
+	// Use compactPointer for round-robin file selection to compact evenly across the level.
 	ptr := vs.compactPointer[level]
 	for _, f := range files {
 		if len(ptr) <= 0 || vs.icmp.Compare(f.largest, ptr) > 0 {
