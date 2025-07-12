@@ -236,6 +236,86 @@ func TestDBIteratorBasic(t *testing.T) {
 	require.NoError(t, it.Error())
 }
 
+func TestDBIteratorSnapshotAtCreation(t *testing.T) {
+	testDir := t.TempDir()
+	ldb, err := Open(db.DefaultOptions(), testDir)
+	require.NoError(t, err)
+	defer ldb.Close()
+
+	require.NoError(t, ldb.Put([]byte("a"), []byte("1"), nil))
+	require.NoError(t, ldb.Put([]byte("b"), []byte("2"), nil))
+	require.NoError(t, ldb.Put([]byte("c"), []byte("3"), nil))
+
+	it, err := ldb.NewIterator(nil)
+	require.NoError(t, err)
+
+	require.NoError(t, ldb.Put([]byte("b"), []byte("2b"), nil))
+	require.NoError(t, ldb.Delete([]byte("c"), nil))
+	require.NoError(t, ldb.Put([]byte("d"), []byte("4"), nil))
+
+	it.SeekToFirst()
+	var keys []string
+	var values []string
+	for it.Valid() {
+		keys = append(keys, string(it.Key()))
+		values = append(values, string(it.Value()))
+		it.Next()
+	}
+	require.NoError(t, it.Error())
+	require.Equal(t, []string{"a", "b", "c"}, keys)
+	require.Equal(t, []string{"1", "2", "3"}, values)
+	require.NoError(t, it.Close())
+
+	it2, err := ldb.NewIterator(nil)
+	require.NoError(t, err)
+	defer it2.Close()
+
+	it2.SeekToFirst()
+	keys = keys[:0]
+	values = values[:0]
+	for it2.Valid() {
+		keys = append(keys, string(it2.Key()))
+		values = append(values, string(it2.Value()))
+		it2.Next()
+	}
+	require.NoError(t, it2.Error())
+	require.Equal(t, []string{"a", "b", "d"}, keys)
+	require.Equal(t, []string{"1", "2b", "4"}, values)
+}
+
+func TestDBIteratorWithReadOptionsSnapshot(t *testing.T) {
+	testDir := t.TempDir()
+	ldb, err := Open(db.DefaultOptions(), testDir)
+	require.NoError(t, err)
+	defer ldb.Close()
+
+	require.NoError(t, ldb.Put([]byte("a"), []byte("1"), nil))
+	require.NoError(t, ldb.Put([]byte("b"), []byte("2"), nil))
+
+	snap := ldb.GetSnapshot()
+	defer snap.Release()
+
+	require.NoError(t, ldb.Put([]byte("b"), []byte("2b"), nil))
+	require.NoError(t, ldb.Delete([]byte("a"), nil))
+	require.NoError(t, ldb.Put([]byte("c"), []byte("3"), nil))
+
+	it, err := ldb.NewIterator(&db.ReadOptions{Snapshot: snap})
+	require.NoError(t, err)
+	defer it.Close()
+
+	it.SeekToFirst()
+	var keys []string
+	var values []string
+	for it.Valid() {
+		keys = append(keys, string(it.Key()))
+		values = append(values, string(it.Value()))
+		it.Next()
+	}
+	require.NoError(t, it.Error())
+	require.Equal(t, []string{"a", "b"}, keys)
+	require.Equal(t, []string{"1", "2"}, values)
+}
+
 func TestSnapshotDelete(t *testing.T) {
 	testDir := t.TempDir()
 	ldb, err := Open(db.DefaultOptions(), testDir)
@@ -332,8 +412,6 @@ func TestSnapshotWithBatch(t *testing.T) {
 }
 
 func TestDBFlushAndRecover(t *testing.T) {
-	t.Skip("TODO: enable after implementing memtable flush / background compaction")
-
 	testDir := t.TempDir()
 	opt := db.DefaultOptions()
 	opt.WriteBufferSize = 1024
