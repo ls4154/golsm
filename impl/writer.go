@@ -12,8 +12,8 @@ import (
 
 type writer struct {
 	batch    *WriteBatchImpl
-	options  db.WriteOptions
 	resultCh chan error
+	sync     bool
 }
 
 // writeSerializer runs a single goroutine that collects concurrent writes and
@@ -37,15 +37,17 @@ func (db *dbImpl) newWriteSerializer() *writeSerializer {
 	}
 }
 
-func (ws *writeSerializer) Write(updates db.WriteBatch, options db.WriteOptions) error {
+func (ws *writeSerializer) Write(updates db.WriteBatch, opt *db.WriteOptions) error {
 	if updates == nil {
 		return nil
 	}
 	batch := updates.(*WriteBatchImpl)
 	w := &writer{
 		batch:    batch,
-		options:  options,
 		resultCh: make(chan error, 1),
+	}
+	if opt != nil && opt.Sync {
+		w.sync = true
 	}
 
 	ws.writerCh <- w
@@ -68,7 +70,7 @@ func (ws *writeSerializer) main() {
 
 		batch := ws.buildBatchGroup(writers)
 
-		err := ws.apply(batch, writers[0].options.Sync)
+		err := ws.apply(batch, writers[0].sync)
 
 		if batch == ws.tempBatch {
 			ws.tempBatch.clear()
@@ -113,7 +115,7 @@ func (ws *writeSerializer) fetchWriters() []*writer {
 				return writers
 			}
 			// Do not mix sync and non-sync writers in the same batch.
-			if r.options.Sync != first.options.Sync {
+			if r.sync != first.sync {
 				ws.lastWriter = r
 				return writers
 			}

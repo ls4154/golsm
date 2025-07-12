@@ -14,7 +14,7 @@ func TestDBBasic(t *testing.T) {
 	require.NoError(t, err)
 
 	key1, val1 := []byte("key1"), []byte("some value")
-	err = ldb.Put(key1, val1, db.WriteOptions{})
+	err = ldb.Put(key1, val1, nil)
 	require.NoError(t, err)
 
 	val, err := ldb.Get(key1, nil)
@@ -22,7 +22,7 @@ func TestDBBasic(t *testing.T) {
 	require.Equal(t, val1, val)
 
 	key2, val2 := []byte("key2"), []byte("hello world")
-	err = ldb.Put(key2, val2, db.WriteOptions{})
+	err = ldb.Put(key2, val2, nil)
 	require.NoError(t, err)
 
 	val, err = ldb.Get(key2, nil)
@@ -30,21 +30,21 @@ func TestDBBasic(t *testing.T) {
 	require.Equal(t, val2, val)
 
 	val1 = []byte("new value")
-	err = ldb.Put(key1, val1, db.WriteOptions{})
+	err = ldb.Put(key1, val1, nil)
 	require.NoError(t, err)
 
 	val, err = ldb.Get(key1, nil)
 	require.NoError(t, err)
 	require.Equal(t, val1, val)
 
-	err = ldb.Delete(key2, db.WriteOptions{})
+	err = ldb.Delete(key2, nil)
 	require.NoError(t, err)
 
 	_, err = ldb.Get(key2, nil)
 	require.ErrorIs(t, err, db.ErrNotFound)
 
 	key3, val3 := []byte(""), []byte("empty key")
-	err = ldb.Put(key3, val3, db.WriteOptions{})
+	err = ldb.Put(key3, val3, nil)
 	require.NoError(t, err)
 
 	val, err = ldb.Get(key3, nil)
@@ -55,7 +55,7 @@ func TestDBBasic(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, val3, val)
 
-	err = ldb.Delete(key3, db.WriteOptions{})
+	err = ldb.Delete(key3, nil)
 	require.NoError(t, err)
 
 	_, err = ldb.Get(key3, nil)
@@ -73,7 +73,7 @@ func TestBatch(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		batch.Put([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("value%d", i)))
 	}
-	err = ldb.Write(batch, db.WriteOptions{})
+	err = ldb.Write(batch, nil)
 	require.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
@@ -86,7 +86,7 @@ func TestBatch(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		batch.Delete([]byte(fmt.Sprintf("key%d", i)))
 	}
-	err = ldb.Write(batch, db.WriteOptions{})
+	err = ldb.Write(batch, nil)
 	require.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
@@ -106,7 +106,7 @@ func TestDBOverwrite(t *testing.T) {
 
 	for i := 0; i < 1000; i++ {
 		val := []byte(fmt.Sprintf("value%d", i))
-		err = ldb.Put(key, val, db.WriteOptions{})
+		err = ldb.Put(key, val, nil)
 		require.NoError(t, err)
 
 		readVal, err := ldb.Get(key, nil)
@@ -123,15 +123,15 @@ func TestSnapshot(t *testing.T) {
 	require.NoError(t, err)
 
 	key1, val1 := []byte("key1"), []byte("v1")
-	err = ldb.Put(key1, val1, db.WriteOptions{})
+	err = ldb.Put(key1, val1, nil)
 	require.NoError(t, err)
 
 	snap := ldb.GetSnapshot()
 
 	val2 := []byte("v2")
-	err = ldb.Put(key1, val2, db.WriteOptions{})
+	err = ldb.Put(key1, val2, nil)
 	key2 := []byte("key2")
-	err = ldb.Put(key2, nil, db.WriteOptions{})
+	err = ldb.Put(key2, nil, nil)
 
 	val, err := ldb.Get(key1, nil)
 	require.NoError(t, err)
@@ -162,16 +162,16 @@ func TestDBIteratorBasic(t *testing.T) {
 	require.NoError(t, err)
 	defer ldb.Close()
 
-	require.NoError(t, ldb.Put([]byte("a"), []byte("1"), db.WriteOptions{}))
-	require.NoError(t, ldb.Put([]byte("b"), []byte("@"), db.WriteOptions{}))
-	require.NoError(t, ldb.Put([]byte("c"), []byte("3"), db.WriteOptions{}))
-	require.NoError(t, ldb.Put([]byte("cc"), []byte("33"), db.WriteOptions{}))
+	require.NoError(t, ldb.Put([]byte("a"), []byte("1"), nil))
+	require.NoError(t, ldb.Put([]byte("b"), []byte("@"), nil))
+	require.NoError(t, ldb.Put([]byte("c"), []byte("3"), nil))
+	require.NoError(t, ldb.Put([]byte("cc"), []byte("33"), nil))
 
-	require.NoError(t, ldb.Put([]byte("b"), []byte("2"), db.WriteOptions{}))
-	require.NoError(t, ldb.Delete([]byte("cc"), db.WriteOptions{}))
+	require.NoError(t, ldb.Put([]byte("b"), []byte("2"), nil))
+	require.NoError(t, ldb.Delete([]byte("cc"), nil))
 
-	require.NoError(t, ldb.Put([]byte("d"), []byte("4"), db.WriteOptions{}))
-	require.NoError(t, ldb.Put([]byte("e"), []byte("5"), db.WriteOptions{}))
+	require.NoError(t, ldb.Put([]byte("d"), []byte("4"), nil))
+	require.NoError(t, ldb.Put([]byte("e"), []byte("5"), nil))
 
 	it, err := ldb.NewIterator(nil)
 	require.NoError(t, err)
@@ -242,12 +242,12 @@ func TestSnapshotDelete(t *testing.T) {
 	require.NoError(t, err)
 
 	key, val := []byte("key"), []byte("val")
-	err = ldb.Put(key, val, db.WriteOptions{})
+	err = ldb.Put(key, val, nil)
 	require.NoError(t, err)
 
 	snap := ldb.GetSnapshot()
 
-	err = ldb.Delete(key, db.WriteOptions{})
+	err = ldb.Delete(key, nil)
 	require.NoError(t, err)
 
 	readVal, err := ldb.Get(key, &db.ReadOptions{Snapshot: snap})
@@ -267,7 +267,7 @@ func TestRecover(t *testing.T) {
 	keys := []string{"foo", "bar", "hello", "empty", ""}
 	values := []string{"foovalue", "barvalue", "world", "", "empty"}
 	for i := range keys {
-		err = ldb.Put([]byte(keys[i]), []byte(values[i]), db.WriteOptions{})
+		err = ldb.Put([]byte(keys[i]), []byte(values[i]), nil)
 		require.NoError(t, err)
 	}
 	err = ldb.Close()
@@ -291,8 +291,8 @@ func TestSnapshotWithBatch(t *testing.T) {
 	require.NoError(t, err)
 
 	key1, key2, key3 := []byte("key1"), []byte("key2"), []byte("key3")
-	require.NoError(t, ldb.Put(key1, []byte("value1"), db.WriteOptions{}))
-	require.NoError(t, ldb.Put(key2, []byte("value2"), db.WriteOptions{}))
+	require.NoError(t, ldb.Put(key1, []byte("value1"), nil))
+	require.NoError(t, ldb.Put(key2, []byte("value2"), nil))
 
 	snap := ldb.GetSnapshot()
 
@@ -300,7 +300,7 @@ func TestSnapshotWithBatch(t *testing.T) {
 	batch.Put(key1, []byte("value1-updated"))
 	batch.Delete(key2)
 	batch.Put(key3, []byte("value3"))
-	require.NoError(t, ldb.Write(batch, db.WriteOptions{}))
+	require.NoError(t, ldb.Write(batch, nil))
 
 	// latest view
 	val, err := ldb.Get(key1, nil)
@@ -346,11 +346,11 @@ func TestDBFlushAndRecover(t *testing.T) {
 	for i := 0; i < totalKeys; i++ {
 		key := fmt.Sprintf("key%04d", i)
 		val := fmt.Sprintf("val%04d", i)
-		require.NoError(t, ldb.Put([]byte(key), []byte(val), db.WriteOptions{}))
+		require.NoError(t, ldb.Put([]byte(key), []byte(val), nil))
 		expected[key] = val
 
 		if i%5 == 0 {
-			require.NoError(t, ldb.Delete([]byte(key), db.WriteOptions{}))
+			require.NoError(t, ldb.Delete([]byte(key), nil))
 			delete(expected, key)
 		}
 	}

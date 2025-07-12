@@ -409,23 +409,23 @@ func (d *dbImpl) Get(key []byte, options *db.ReadOptions) ([]byte, error) {
 	return value, nil
 }
 
-func (d *dbImpl) Put(key []byte, value []byte, options db.WriteOptions) error {
+func (d *dbImpl) Put(key []byte, value []byte, opt *db.WriteOptions) error {
 	batch := NewWriteBatch()
 	batch.Put(key, value)
-	return d.Write(batch, options)
+	return d.Write(batch, opt)
 }
 
-func (d *dbImpl) Delete(key []byte, options db.WriteOptions) error {
+func (d *dbImpl) Delete(key []byte, opt *db.WriteOptions) error {
 	batch := NewWriteBatch()
 	batch.Delete(key)
-	return d.Write(batch, options)
+	return d.Write(batch, opt)
 }
 
-func (d *dbImpl) Write(updates db.WriteBatch, options db.WriteOptions) error {
+func (d *dbImpl) Write(updates db.WriteBatch, opt *db.WriteOptions) error {
 	if updates == nil {
 		return nil
 	}
-	return d.writeSerializer.Write(updates, options)
+	return d.writeSerializer.Write(updates, opt)
 }
 
 func (d *dbImpl) NewIterator(options *db.ReadOptions) (db.Iterator, error) {

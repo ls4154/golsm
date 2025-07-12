@@ -6,9 +6,9 @@ import (
 
 type DB interface {
 	Get(key []byte, options *ReadOptions) ([]byte, error)
-	Put(key, value []byte, options WriteOptions) error
-	Delete(key []byte, options WriteOptions) error
-	Write(batch WriteBatch, options WriteOptions) error
+	Put(key, value []byte, options *WriteOptions) error
+	Delete(key []byte, options *WriteOptions) error
+	Write(batch WriteBatch, options *WriteOptions) error
 	NewIterator(options *ReadOptions) (Iterator, error)
 	GetSnapshot() Snapshot
 	Close() error
