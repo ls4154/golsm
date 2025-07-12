@@ -23,6 +23,9 @@ type TableBuilder struct {
 	numEntries    uint64
 	compressedBuf []byte
 
+	// pendingIndexEntry is set after a data block is flushed. The index entry
+	// is written on the next Add/Finish call, once the first key of the new block
+	// is known, so FindShortestSeparator can shorten the index key.
 	pendingIndexEntry bool
 	pendingHandle     BlockHandle
 
@@ -41,7 +44,8 @@ func NewTableBuilder(file db.WritableFile, cmp db.Comparator, blockSize int, com
 
 		file: file,
 
-		block:      NewBlockBuilder(restartInterval),
+		block: NewBlockBuilder(restartInterval),
+		// Index block uses restart interval 1 (no prefix compression)
 		indexBlock: NewBlockBuilder(1),
 	}
 }
@@ -111,6 +115,7 @@ func (b *TableBuilder) writeBlock(block *BlockBuilder, handle *BlockHandle) {
 		blockContents = raw
 	case db.SnappyCompression:
 		compressed := util.SnappyCompress(raw)
+		// Only use compressed data if it is smaller by more than 12.5%.
 		if len(compressed) < len(raw)-(len(raw)/8) {
 			blockContents = compressed
 		} else {

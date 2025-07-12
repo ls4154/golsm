@@ -8,11 +8,12 @@ import (
 	"github.com/ls4154/golsm/db"
 )
 
-const (
-	MagicNumber      = 0xdb4775248b80fb57
-	BlockTrailerSize = 5
-)
+const MagicNumber = 0xdb4775248b80fb57
 
+// BlockTrailer: 1 byte compression type + 4 bytes masked CRC32C
+const BlockTrailerSize = 5
+
+// maximum encoded size of a BlockHandle. Each field is encoded as varint64.
 const BlockHandleMaxLength = 10 + 10
 
 type BlockHandle struct {
@@ -45,6 +46,9 @@ func DecodeBlockHandle(buf []byte) (BlockHandle, int, error) {
 
 const FooterLength = 2*BlockHandleMaxLength + 8
 
+// Footer sits at the end of every SSTable file at a fixed position, serving
+// as the anchor for reading: open by reading the footer, then follow its
+// handles to locate the metaindex and index blocks.
 type Footer struct {
 	MetaindexHandle BlockHandle
 	IndexHandle     BlockHandle

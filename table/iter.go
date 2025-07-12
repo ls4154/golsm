@@ -9,6 +9,10 @@ import (
 
 type BlockFn func([]byte) (db.Iterator, error)
 
+// TwoLevelIterator walks an SSTable via two levels: indexIter scans the index
+// block whose values are data block handles, and dataIter scans the current
+// data block. Moving across block boundaries advances indexIter and reloads
+// dataIter via blockFn.
 type TwoLevelIterator struct {
 	indexIter       db.Iterator
 	dataIter        db.Iterator

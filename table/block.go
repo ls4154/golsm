@@ -14,6 +14,13 @@ var (
 	ErrInvalidEntry = errors.New("invalid entry")
 )
 
+// Block holds the raw bytes of a data or index block. The layout is:
+//
+//	[prefix-compressed entries] [restart array] [restart count (4B)]
+//
+// The restart array stores byte offsets of entries where key prefix
+// compression restarts (i.e., a full key is stored). It enables binary
+// search within the block.
 type Block struct {
 	contents []byte
 }
@@ -162,7 +169,7 @@ func decodeBlockEntryLength(b []byte) (uint32, uint32, uint32, int, error) {
 	valueLen := uint32(b[2])
 
 	if (shared | nonShared | valueLen) < 128 {
-		// all three lengths encoded in single byte
+		// fast path: all three lengths fit in one byte each (varint single-byte range)
 		return shared, nonShared, valueLen, 3, nil
 	}
 
@@ -199,6 +206,8 @@ func (it *BlockIterator) SeekToFirst() {
 	it.parseNextEntry()
 }
 
+// Seek binary searches the restart array to find the region containing target,
+// then does a linear scan within that region.
 func (it *BlockIterator) Seek(target []byte) {
 	left := uint32(0)
 	right := it.numRestart - 1
@@ -263,6 +272,9 @@ func (it *BlockIterator) Next() {
 	it.parseNextEntry()
 }
 
+// Prev seeks backward by finding the restart point before the current entry
+// and scanning forward to the entry just before it, since the block format
+// does not support backward iteration natively.
 func (it *BlockIterator) Prev() {
 	util.Assert(it.Valid())
 

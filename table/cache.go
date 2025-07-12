@@ -16,6 +16,8 @@ func NewBlockCache(capacity int) *BlockCache {
 	}
 }
 
+// BlockCacheKey uniquely identifies a block across all open tables:
+// 8 bytes table cache ID followed by 8 bytes block offset within the file.
 type BlockCacheKey [16]byte
 
 func (c *BlockCache) Lookup(key BlockCacheKey) (*Block, func()) {
