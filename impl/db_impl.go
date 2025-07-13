@@ -476,7 +476,8 @@ func (d *dbImpl) newInternalIterator(options *db.ReadOptions) (db.Iterator, uint
 
 func (d *dbImpl) GetSnapshot() db.Snapshot {
 	seq := d.versions.GetLastSequence()
-	return d.snapshots.NewSnapshot(seq)
+	s := d.snapshots.NewSnapshot(seq, d)
+	return s
 }
 
 func (d *dbImpl) Close() error {

@@ -6,12 +6,16 @@ type SnapshotList struct {
 
 type Snapshot struct {
 	seq uint64
+	db  *dbImpl
 
 	prev *Snapshot
 	next *Snapshot
 }
 
 func (s *Snapshot) Release() {
+	s.db.mu.Lock()
+	defer s.db.mu.Unlock()
+
 	s.prev.next = s.next
 	s.next.prev = s.prev
 	s.next = nil
@@ -25,9 +29,10 @@ func NewSnapshotList() *SnapshotList {
 	return l
 }
 
-func (l *SnapshotList) NewSnapshot(seq uint64) *Snapshot {
+func (l *SnapshotList) NewSnapshot(seq uint64, db *dbImpl) *Snapshot {
 	s := &Snapshot{
 		seq: seq,
+		db:  db,
 	}
 	s.next = &l.head
 	s.prev = l.head.prev
