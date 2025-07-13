@@ -19,3 +19,7 @@ func NewCRC32C() hash.Hash32 {
 	h := crc32.New(crc32cTable)
 	return &crc32cHash{h}
 }
+
+func ChecksumCRC32C(data []byte) uint32 {
+	return crc32.Checksum(data, crc32cTable)
+}

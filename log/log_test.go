@@ -5,6 +5,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/ls4154/golsm/db"
 	"github.com/stretchr/testify/require"
 )
 
@@ -72,4 +73,17 @@ func repeatedBytes(input []byte, n int) []byte {
 		r = append(r, input...)
 	}
 	return r
+}
+
+func TestLogCRCChecksumMismatch(t *testing.T) {
+	var buf bytes.Buffer
+	writer := NewWriter(&buf)
+	require.NoError(t, writer.AddRecord([]byte("test-log-record")))
+
+	raw := buf.Bytes()
+	raw[logHeaderSize] ^= 0x01 // corrupt payload to trigger CRC mismatch
+
+	reader := NewReader(bytes.NewReader(raw))
+	_, err := reader.ReadRecord()
+	require.ErrorIs(t, err, db.ErrCorruption)
 }

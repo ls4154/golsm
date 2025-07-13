@@ -1,6 +1,7 @@
 package log
 
 import (
+	"encoding/binary"
 	"io"
 
 	"github.com/ls4154/golsm/util"
@@ -31,7 +32,11 @@ func (w *Writer) AddRecord(data []byte) error {
 
 		// fill zeroes and switch to a new block
 		if leftover < logHeaderSize {
-			w.dest.Write(zeroArray[:leftover])
+			n, err := w.dest.Write(zeroArray[:leftover])
+			if err != nil {
+				return err
+			}
+			util.Assert(n == leftover)
 			w.blockOffset = 0
 		}
 
@@ -75,9 +80,13 @@ func (w *Writer) emitPhysicalRecord(t logRecordType, data []byte) error {
 	buf[5] = byte(length >> 8)
 	buf[6] = byte(t)
 
-	// TODO crc
+	h := util.NewCRC32C()
+	h.Write(buf[6:7])
+	h.Write(data)
+	crc := h.Sum32()
+	binary.LittleEndian.PutUint32(buf[:], util.MaskCRC32(crc))
 
-	n, err := w.dest.Write(buf[:])
+	n, err := w.dest.Write(buf[0:])
 	if err != nil {
 		return err
 	}

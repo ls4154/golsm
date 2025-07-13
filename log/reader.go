@@ -1,11 +1,13 @@
 package log
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 
 	"github.com/ls4154/golsm/db"
+	"github.com/ls4154/golsm/util"
 )
 
 type Reader struct {
@@ -14,12 +16,14 @@ type Reader struct {
 	buf          []byte             // unprocessed slice into backingStore
 	offset       int
 	eof          bool
+	verifyCRC    bool
 }
 
 func NewReader(src io.Reader) *Reader {
 	r := &Reader{
-		src:    src,
-		offset: 0,
+		src:       src,
+		offset:    0,
+		verifyCRC: true,
 	}
 
 	return r
@@ -32,7 +36,10 @@ func (r *Reader) ReadRecord() ([]byte, error) {
 	var record []byte
 	inFragmentedRecord := false
 	for {
-		fragment, recordType := r.readPhysicalRecord()
+		fragment, recordType, err := r.readPhysicalRecord()
+		if err != nil {
+			return nil, err
+		}
 
 		// TODO resyncing?
 
@@ -71,52 +78,53 @@ func (r *Reader) ReadRecord() ([]byte, error) {
 	}
 }
 
-func (r *Reader) readPhysicalRecord() ([]byte, logRecordType) {
+func (r *Reader) readPhysicalRecord() ([]byte, logRecordType, error) {
 	for {
 		if len(r.buf) < logHeaderSize {
 			if !r.eof {
 				n, err := r.src.Read(r.backingStore[:])
-				r.buf = r.backingStore[:n]
-				if err != nil {
-					if errors.Is(err, io.EOF) {
-						r.eof = true
-						return nil, logRecordEof
-					} else {
-						// TODO ??
-						panic(err)
-					}
+				if err != nil && !errors.Is(err, io.EOF) {
+					return nil, logRecordBad, fmt.Errorf("%w: %s", db.ErrIO, err)
 				}
-				if n < logBlockSize {
+
+				r.buf = r.backingStore[:n]
+				if n < logBlockSize || errors.Is(err, io.EOF) {
 					r.eof = true
 				}
 				continue
 			} else {
 				// ignore truncated header at eof
-				return nil, logRecordEof
+				return nil, logRecordEof, nil
 			}
 		}
 
 		length := int(r.buf[4]) | (int(r.buf[5]) << 8)
 		if logHeaderSize+length > len(r.buf) {
 			if !r.eof {
-				return nil, logRecordBad
+				return nil, logRecordBad, nil
 			} else {
 				// ignore truncated record at eof
-				return nil, logRecordEof
+				return nil, logRecordEof, nil
 			}
 		}
 
 		t := logRecordType(r.buf[6])
 
 		if t == logRecordZero && length == 0 {
-			return nil, logRecordBad
+			return nil, logRecordBad, nil
 		}
 
-		// TODO crc
+		if r.verifyCRC {
+			expectedCRC := util.UnmaskCRC32(binary.LittleEndian.Uint32(r.buf[0:]))
+			actualCRC := util.ChecksumCRC32C(r.buf[6 : 6+1+length])
+			if expectedCRC != actualCRC {
+				return nil, logRecordBad, nil
+			}
+		}
 
 		result := r.buf[logHeaderSize : logHeaderSize+length]
 		r.buf = r.buf[logHeaderSize+length:]
 
-		return result, t
+		return result, t, nil
 	}
 }
