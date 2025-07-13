@@ -10,8 +10,8 @@ import (
 
 type Reader struct {
 	src          io.Reader
-	backingStore [logBlockSize]byte
-	buf          []byte
+	backingStore [logBlockSize]byte // fixed read buffer
+	buf          []byte             // unprocessed slice into backingStore
 	offset       int
 	eof          bool
 }
@@ -25,6 +25,8 @@ func NewReader(src io.Reader) *Reader {
 	return r
 }
 
+// ReadRecord reassembles one logical WAL record from one or more
+// physical fragments (FULL/FIRST/MIDDLE/LAST).
 // TODO scratch
 func (r *Reader) ReadRecord() ([]byte, error) {
 	var record []byte
@@ -89,6 +91,7 @@ func (r *Reader) readPhysicalRecord() ([]byte, logRecordType) {
 				}
 				continue
 			} else {
+				// ignore truncated header at eof
 				return nil, logRecordEof
 			}
 		}
@@ -97,8 +100,10 @@ func (r *Reader) readPhysicalRecord() ([]byte, logRecordType) {
 		if logHeaderSize+length > len(r.buf) {
 			if !r.eof {
 				return nil, logRecordBad
+			} else {
+				// ignore truncated record at eof
+				return nil, logRecordEof
 			}
-			return nil, logRecordEof
 		}
 
 		t := logRecordType(r.buf[6])

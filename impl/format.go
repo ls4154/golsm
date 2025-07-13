@@ -20,6 +20,7 @@ const (
 	TypeDeletion ValueType = 0
 	TypeValue    ValueType = 1
 
+	// TypeValue is the highest type value, so a seek key lands at the newest version.
 	TypeForSeek = TypeValue
 )
 
@@ -29,6 +30,8 @@ func PackSequenceAndType(seq uint64, t ValueType) uint64 {
 	return (seq << 8) | uint64(t)
 }
 
+// InternalKey: [user key] [seq(56b) | type(8b)]
+// Sorted by user key ASC, trailer DESC (newer first).
 type InternalKey []byte
 
 type InternalKeyComparator struct {

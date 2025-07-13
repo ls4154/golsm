@@ -30,7 +30,7 @@ func (it *levelFileNumIterator) Error() error {
 }
 
 func (it *levelFileNumIterator) Key() []byte {
-	panic("TODO")
+	panic("not used")
 }
 
 func (it *levelFileNumIterator) Next() {
