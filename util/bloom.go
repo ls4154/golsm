@@ -11,16 +11,20 @@ type BloomFilterPolicy struct {
 	k          int
 }
 
-func (b *BloomFilterPolicy) CreateFilter(keys [][]byte) []byte {
+func (b *BloomFilterPolicy) AppendFilter(keys [][]byte, dst []byte) []byte {
 	bits := len(keys) * b.bitsPerKey
 	if bits < 64 {
 		bits = 64
 	}
 
-	bytes := (bits + 7) / 8 * 8
+	bytes := (bits + 7) / 8
 	bits = bytes * 8
 
-	filter := make([]byte, bytes+1)
+	initLen := len(dst)
+	dst = append(dst, make([]byte, bytes+1)...)
+
+	filter := dst[initLen:]
+	Assert(len(filter) == bytes+1)
 	filter[bytes] = byte(b.k)
 
 	for _, key := range keys {
@@ -34,7 +38,7 @@ func (b *BloomFilterPolicy) CreateFilter(keys [][]byte) []byte {
 		}
 	}
 
-	return filter
+	return dst
 }
 
 func (b *BloomFilterPolicy) MayMatch(key []byte, filter []byte) bool {
@@ -100,13 +104,15 @@ func ldbHash(data []byte, seed uint32) uint32 {
 
 	switch n - i {
 	case 3:
-		h += uint32(data[2]) << 16
+		h += uint32(data[i+2]) << 16
 		fallthrough
 	case 2:
-		h += uint32(data[1]) << 8
+		h += uint32(data[i+1]) << 8
 		fallthrough
 	case 1:
-		h += uint32(data[0])
+		h += uint32(data[i])
+		h *= m
+		h ^= (h >> r)
 	}
 
 	return h

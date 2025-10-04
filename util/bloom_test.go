@@ -15,7 +15,7 @@ func TestBloomFilter(t *testing.T) {
 		[]byte("bye"),
 	}
 
-	filter := bloom.CreateFilter(keys)
+	filter := bloom.AppendFilter(keys, nil)
 
 	for _, k := range keys {
 		require.True(t, bloom.MayMatch(k, filter))
