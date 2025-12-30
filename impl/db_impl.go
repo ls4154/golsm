@@ -498,6 +498,8 @@ func (d *dbImpl) Close() error {
 		_ = d.infoLogFile.Close()
 	}
 
+	// TODO cleanup cached resources?
+
 	return nil
 }
 

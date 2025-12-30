@@ -413,6 +413,7 @@ func (vs *VersionSet) LogAndApply(edit *VersionEdit, dbMu *sync.Mutex) error {
 
 	setCurrent := false
 	if vs.descriptorLog == nil {
+		// TODO If manifest rotation is added later, protect the temporary CURRENT file, to avoid obsolete GC races
 		setCurrent = true
 		newManifestFile := DescriptorFileName(vs.dbname, vs.manifestFileNumber)
 		f, err := vs.env.NewWritableFile(newManifestFile)

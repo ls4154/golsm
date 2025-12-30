@@ -171,7 +171,7 @@ func (d *dbImpl) NewCompactionOutputBuilder() (*table.TableBuilder, uint64, db.W
 	d.mu.Lock()
 
 	fileNum := d.versions.NewFileNumber()
-	d.RegisterPendingOutput(fileNum)
+	d.RegisterPendingOutput(fileNum) // TODO not cleaned up if new file opening is failed
 
 	d.mu.Unlock()
 
