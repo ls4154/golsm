@@ -610,8 +610,8 @@ func (d *dbImpl) FindObsoleteFiles() []string {
 		keep := true
 		switch ftype {
 		case FileTypeLog:
-			// TODO remove older log files
-			keep = true
+			// Keep current log and previous log needed for recovery.
+			keep = (fnum >= d.versions.logNumber) || (fnum == d.versions.prevLogNumber)
 		case FileTypeDescriptor:
 			// TODO remove older manifest
 			keep = true
