@@ -15,6 +15,8 @@ func validateOption(userOpt *db.Options) (*db.Options, error) {
 
 	opt := &db.Options{}
 
+	opt.CreateIfMissing = userOpt.CreateIfMissing
+	opt.ErrorIfExists = userOpt.ErrorIfExists
 	opt.BlockSize = clipToRange(userOpt.BlockSize, 1<<10, 4<<20)
 	opt.BlockRestartInterval = clipToRange(userOpt.BlockRestartInterval, 1, 128)
 	opt.MaxFileSize = clipToRange(userOpt.MaxFileSize, 1<<20, 1<<30)

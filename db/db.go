@@ -39,6 +39,8 @@ const (
 )
 
 type Options struct {
+	CreateIfMissing      bool
+	ErrorIfExists        bool
 	BlockSize            int
 	BlockRestartInterval int
 	MaxFileSize          uint64
@@ -52,6 +54,8 @@ type Options struct {
 
 func DefaultOptions() *Options {
 	return &Options{
+		CreateIfMissing:      true,
+		ErrorIfExists:        false,
 		BlockSize:            4 * 1024,
 		BlockRestartInterval: 16,
 		MaxFileSize:          4 * 1024 * 1024,

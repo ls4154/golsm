@@ -454,3 +454,27 @@ func TestDBFlushAndRecover(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenFailsWhenCreateIfMissingIsFalse(t *testing.T) {
+	testDir := t.TempDir()
+
+	opt := db.DefaultOptions()
+	opt.CreateIfMissing = false
+
+	_, err := Open(opt, testDir)
+	require.ErrorIs(t, err, db.ErrInvalidArgument)
+}
+
+func TestOpenFailsWhenErrorIfExistsIsTrue(t *testing.T) {
+	testDir := t.TempDir()
+
+	ldb, err := Open(db.DefaultOptions(), testDir)
+	require.NoError(t, err)
+	require.NoError(t, ldb.Close())
+
+	opt := db.DefaultOptions()
+	opt.ErrorIfExists = true
+
+	_, err = Open(opt, testDir)
+	require.ErrorIs(t, err, db.ErrInvalidArgument)
+}

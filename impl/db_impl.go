@@ -138,15 +138,20 @@ func (d *dbImpl) recover(edit *VersionEdit) error {
 
 	// TODO lockfile
 
-	if !d.env.FileExists(CurrentFileName(d.dbname)) {
-		// TODO creaste_if_missing option
+	dbExists := d.env.FileExists(CurrentFileName(d.dbname))
+	if !dbExists {
+		if !d.options.CreateIfMissing {
+			return fmt.Errorf("%w: db does not exist: %s", db.ErrInvalidArgument, d.dbname)
+		}
+
 		d.logger.Printf("Creating DB %s", d.dbname)
 		err := d.newDB()
 		if err != nil {
 			return err
 		}
+	} else if d.options.ErrorIfExists {
+		return fmt.Errorf("%w: db already exists: %s", db.ErrInvalidArgument, d.dbname)
 	}
-	// TODO error_if_exists option
 
 	err := d.versions.Recover()
 	if err != nil {
