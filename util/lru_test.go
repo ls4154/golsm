@@ -187,3 +187,42 @@ func TestLRUInsertCopiesKey(t *testing.T) {
 	require.Equal(t, 1, h.Value())
 	c.Release(h)
 }
+
+func TestLRUErase(t *testing.T) {
+	c := NewLRUCache[int](2)
+
+	evicted := 0
+	c.SetOnEvict(func(k []byte, v *int) {
+		if string(k) == "a" && *v == 1 {
+			evicted++
+		}
+	})
+
+	h := c.Insert([]byte("a"), 1, 1)
+	c.Release(h)
+
+	c.Erase([]byte("a"))
+
+	require.Equal(t, 1, evicted)
+	require.Nil(t, c.Lookup([]byte("a")))
+}
+
+func TestLRUEraseWithOutstandingRef(t *testing.T) {
+	c := NewLRUCache[int](2)
+
+	evicted := 0
+	c.SetOnEvict(func(k []byte, v *int) {
+		if string(k) == "a" && *v == 1 {
+			evicted++
+		}
+	})
+
+	h := c.Insert([]byte("a"), 1, 1) // hold external ref
+
+	c.Erase([]byte("a"))
+	require.Equal(t, 0, evicted)
+
+	c.Release(h)
+	require.Equal(t, 1, evicted)
+	require.Nil(t, c.Lookup([]byte("a")))
+}

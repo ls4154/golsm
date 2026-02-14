@@ -234,3 +234,58 @@ func TestTableCacheInUseNotEvicted(t *testing.T) {
 	require.Equal(t, int32(0), atomic.LoadInt32(&closed2))
 	require.Equal(t, int32(0), atomic.LoadInt32(&closed3))
 }
+
+func TestTableCacheEvict(t *testing.T) {
+	data := buildTableBytes(t)
+
+	dbname := "/db"
+	f := TableFileName(dbname, 1)
+
+	var closed int32
+	env := &memEnv{
+		files: map[string][]byte{
+			f: data,
+		},
+		closed: map[string]*int32{
+			f: &closed,
+		},
+	}
+
+	tc := NewTableCache(dbname, env, 1, util.BytewiseComparator, nil)
+
+	it, err := tc.NewIterator(1, uint64(len(data)))
+	require.NoError(t, err)
+	require.NoError(t, it.Close())
+	require.Equal(t, int32(0), atomic.LoadInt32(&closed))
+
+	tc.Evict(1)
+	require.Equal(t, int32(1), atomic.LoadInt32(&closed))
+}
+
+func TestTableCacheEvictWithOutstandingIterator(t *testing.T) {
+	data := buildTableBytes(t)
+
+	dbname := "/db"
+	f := TableFileName(dbname, 1)
+
+	var closed int32
+	env := &memEnv{
+		files: map[string][]byte{
+			f: data,
+		},
+		closed: map[string]*int32{
+			f: &closed,
+		},
+	}
+
+	tc := NewTableCache(dbname, env, 1, util.BytewiseComparator, nil)
+
+	it, err := tc.NewIterator(1, uint64(len(data)))
+	require.NoError(t, err)
+
+	tc.Evict(1)
+	require.Equal(t, int32(0), atomic.LoadInt32(&closed))
+
+	require.NoError(t, it.Close())
+	require.Equal(t, int32(1), atomic.LoadInt32(&closed))
+}

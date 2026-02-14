@@ -64,6 +64,12 @@ func (tc *TableCache) NewIterator(num, size uint64) (db.Iterator, error) {
 	}), nil
 }
 
+func (tc *TableCache) Evict(num uint64) {
+	key := make([]byte, 8)
+	binary.LittleEndian.PutUint64(key, num)
+	tc.lru.Erase(key)
+}
+
 func (tc *TableCache) findTable(num, size uint64) (*util.LRUHandle[tableAndFile], error) {
 	key := make([]byte, 8)
 	binary.LittleEndian.PutUint64(key, num)

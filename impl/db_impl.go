@@ -620,8 +620,7 @@ func (d *dbImpl) FindObsoleteFiles() []string {
 			// Keep current log and previous log needed for recovery.
 			keep = (fnum >= d.versions.logNumber) || (fnum == d.versions.prevLogNumber)
 		case FileTypeDescriptor:
-			// TODO remove older manifest
-			keep = true
+			keep = fnum >= d.versions.manifestFileNumber
 		case FileTypeCurrent, FileTypeLock, FileTypeInfoLog:
 			keep = true
 		case FileTypeTable, FileTypeTemp:
@@ -631,7 +630,6 @@ func (d *dbImpl) FindObsoleteFiles() []string {
 		}
 
 		if !keep {
-			// TODO evict table file
 			ret = append(ret, fname)
 			d.logger.Printf("Delete type=%d #%d", ftype, fnum)
 		}
@@ -642,6 +640,10 @@ func (d *dbImpl) FindObsoleteFiles() []string {
 
 func (d *dbImpl) DeleteObsoleteFiles(files []string) {
 	for _, fname := range files {
+		ftype, fnum, ok := ParseFileName(fname)
+		if ok && ftype == FileTypeTable && d.tableCache != nil {
+			d.tableCache.Evict(fnum)
+		}
 		_ = d.env.RemoveFile(filepath.Join(d.dbname, fname))
 	}
 }

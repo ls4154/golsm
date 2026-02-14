@@ -102,6 +102,22 @@ func (c *LRUCache[T]) Release(h *LRUHandle[T]) {
 	c.unref(h)
 }
 
+func (c *LRUCache[T]) Erase(key []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	h, ok := c.table[string(key)]
+	if !ok {
+		return
+	}
+
+	lruRemove(h)
+	delete(c.table, h.key)
+	c.usage -= h.charge
+	h.inCache = false
+	c.unref(h)
+}
+
 func (c *LRUCache[T]) unref(h *LRUHandle[T]) {
 	h.ref--
 	if h.ref == 0 {
@@ -116,6 +132,7 @@ func (c *LRUCache[T]) unref(h *LRUHandle[T]) {
 }
 
 func lruRemove[T any](e *LRUHandle[T]) {
+	Assert(e.inCache)
 	e.next.prev = e.prev
 	e.prev.next = e.next
 }

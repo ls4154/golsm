@@ -1,6 +1,7 @@
 package impl
 
 import (
+	"sync/atomic"
 	"testing"
 
 	"github.com/ls4154/golsm/db"
@@ -140,4 +141,69 @@ func TestRemoveObsoleteFilesMultipleLogs(t *testing.T) {
 	d.mu.Unlock()
 
 	require.Equal(t, []string{"db/000003.log"}, env.removed)
+}
+
+func TestRemoveObsoleteFilesMultipleLogsAndManifests(t *testing.T) {
+	env := &recordingEnv{
+		children: []string{
+			"000003.log",
+			"000004.log",
+			"000005.log",
+			"MANIFEST-000001",
+			"MANIFEST-000006",
+			"CURRENT",
+		},
+	}
+
+	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{})
+	vset.logNumber = 5
+	vset.prevLogNumber = 4
+	vset.manifestFileNumber = 6
+	v := vset.NewVersion()
+	vset.AppendVersion(v)
+
+	d := &dbImpl{
+		dbname:         "db",
+		env:            env,
+		versions:       vset,
+		pendingOutputs: map[uint64]struct{}{},
+		logger:         nopLogger{},
+	}
+
+	d.mu.Lock()
+	d.CleanupObsoleteFiles()
+	d.mu.Unlock()
+
+	require.ElementsMatch(t, []string{"db/000003.log", "db/MANIFEST-000001"}, env.removed)
+}
+
+func TestDeleteObsoleteFilesEvictsTableCache(t *testing.T) {
+	data := buildTableBytes(t)
+
+	dbname := "/db"
+	fname := TableFileName(dbname, 1)
+	var closed int32
+	env := &memEnv{
+		files: map[string][]byte{
+			fname: data,
+		},
+		closed: map[string]*int32{
+			fname: &closed,
+		},
+	}
+
+	tc := NewTableCache(dbname, env, 10, util.BytewiseComparator, nil)
+	it, err := tc.NewIterator(1, uint64(len(data)))
+	require.NoError(t, err)
+	require.NoError(t, it.Close())
+	require.Equal(t, int32(0), atomic.LoadInt32(&closed))
+
+	d := &dbImpl{
+		dbname:     dbname,
+		env:        env,
+		tableCache: tc,
+	}
+	d.DeleteObsoleteFiles([]string{"000001.ldb"})
+
+	require.Equal(t, int32(1), atomic.LoadInt32(&closed))
 }
