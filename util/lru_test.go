@@ -121,3 +121,69 @@ func TestLRUCharge(t *testing.T) {
 	require.Equal(t, "w", hd.Value())
 	c.Release(hd)
 }
+
+func TestLRUReplaceSameKeyEvictsOldEntry(t *testing.T) {
+	c := NewLRUCache[int](2)
+
+	oldEvicted := 0
+	c.SetOnEvict(func(k []byte, v *int) {
+		if string(k) == "a" && *v == 1 {
+			oldEvicted++
+		}
+	})
+
+	h1 := c.Insert([]byte("a"), 1, 1)
+	c.Release(h1)
+
+	h2 := c.Insert([]byte("a"), 2, 1)
+	require.Equal(t, 1, oldEvicted)
+	c.Release(h2)
+
+	h := c.Lookup([]byte("a"))
+	require.NotNil(t, h)
+	require.Equal(t, 2, h.Value())
+	c.Release(h)
+}
+
+func TestLRUReplaceSameKeyWithOutstandingRef(t *testing.T) {
+	c := NewLRUCache[int](2)
+
+	oldEvicted := 0
+	c.SetOnEvict(func(k []byte, v *int) {
+		if string(k) == "a" && *v == 1 {
+			oldEvicted++
+		}
+	})
+
+	oldHandle := c.Insert([]byte("a"), 1, 1) // hold external ref
+	newHandle := c.Insert([]byte("a"), 2, 1)
+
+	require.Equal(t, 0, oldEvicted)
+
+	c.Release(oldHandle)
+	require.Equal(t, 1, oldEvicted)
+
+	c.Release(newHandle)
+
+	h := c.Lookup([]byte("a"))
+	require.NotNil(t, h)
+	require.Equal(t, 2, h.Value())
+	c.Release(h)
+}
+
+func TestLRUInsertCopiesKey(t *testing.T) {
+	c := NewLRUCache[int](1)
+
+	k := []byte("ab")
+	h := c.Insert(k, 1, 1)
+	c.Release(h)
+
+	// Mutate original key slice; cache key identity must remain unchanged.
+	k[0] = 'x'
+	require.Nil(t, c.Lookup([]byte("xb")))
+
+	h = c.Lookup([]byte("ab"))
+	require.NotNil(t, h)
+	require.Equal(t, 1, h.Value())
+	c.Release(h)
+}
