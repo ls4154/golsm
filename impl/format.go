@@ -57,13 +57,39 @@ func (*InternalKeyComparator) Name() string {
 }
 
 func (ic *InternalKeyComparator) FindShortestSeparator(start *[]byte, limit []byte) {
-	// TODO
-	return
+	userStart := ExtractUserKey(*start)
+	userLimit := ExtractUserKey(limit)
+
+	tmp := append([]byte(nil), userStart...)
+
+	ic.userCmp.FindShortestSeparator(&tmp, userLimit)
+	if len(tmp) < len(userStart) && ic.userCmp.Compare(userStart, tmp) < 0 {
+		// Build an internal key that is logically larger but physically shorter.
+		shortened := make([]byte, 0, len(tmp)+8)
+		shortened = append(shortened, tmp...)
+		shortened = binary.LittleEndian.AppendUint64(shortened, PackSequenceAndType(MaxSequenceNumber, TypeForSeek))
+
+		util.Assert(ic.Compare(*start, shortened) < 0)
+		util.Assert(ic.Compare(shortened, limit) < 0)
+		*start = shortened
+	}
 }
 
 func (ic *InternalKeyComparator) FindShortSuccessor(key *[]byte) {
-	// TODO
-	return
+	userKey := ExtractUserKey(*key)
+
+	tmp := append([]byte(nil), userKey...)
+
+	ic.userCmp.FindShortSuccessor(&tmp)
+	if len(tmp) < len(userKey) && ic.userCmp.Compare(userKey, tmp) < 0 {
+		// Build the smallest internal key for the shortened user key.
+		successor := make([]byte, 0, len(tmp)+8)
+		successor = append(successor, tmp...)
+		successor = binary.LittleEndian.AppendUint64(successor, PackSequenceAndType(MaxSequenceNumber, TypeForSeek))
+
+		util.Assert(ic.Compare(*key, successor) < 0)
+		*key = successor
+	}
 }
 
 func ExtractUserKey(internalKey []byte) []byte {

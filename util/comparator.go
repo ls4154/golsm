@@ -27,7 +27,10 @@ func (c bytewiseComparator) FindShortestSeparator(start *[]byte, limit []byte) {
 		return
 	}
 
-	// TODO optimize
+	// NOTE: This follows a conservative shortening rule.
+	// More aggressive shortening is possible by handling boundary cases
+	// (e.g. diffByte+1 == limit[diffIndex]) and scanning subsequent bytes
+	// for a non-0xff increment point.
 	diffByte := (*start)[diffIndex]
 	if diffByte < 0xff && diffByte+1 < limit[diffIndex] {
 		(*start)[diffIndex]++
