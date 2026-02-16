@@ -47,6 +47,7 @@ type Options struct {
 	WriteBufferSize      int
 	MaxOpenFiles         int
 	BlockCacheSize       int
+	FilterPolicy         FilterPolicy
 	Compression          CompressionType
 	Comparator           Comparator
 	Logger               Logger

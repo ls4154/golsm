@@ -36,7 +36,7 @@ func writeTable(t *testing.T, env db.Env, name string, numEntries int, compressi
 	require.NoError(t, err, "failed to open file")
 	defer file.Close()
 
-	builder := NewTableBuilder(file, util.BytewiseComparator, 4096, compression, 16)
+	builder := NewTableBuilder(file, util.BytewiseComparator, 4096, compression, 16, nil)
 
 	for i := 0; i < numEntries; i++ {
 		key, value := getTestKeyValue(i)
@@ -61,7 +61,7 @@ func readTable(t *testing.T, env db.Env, name string, numEntries int) {
 	size, err := env.GetFileSize(name)
 	require.NoError(t, err, "failed to get file size")
 
-	tbl, err := OpenTable(file, size, util.BytewiseComparator, nil, 0)
+	tbl, err := OpenTable(file, size, util.BytewiseComparator, nil, nil, 0)
 	require.NoError(t, err, "failed to open table")
 
 	it := tbl.NewIterator()

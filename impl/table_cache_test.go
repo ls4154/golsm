@@ -36,7 +36,7 @@ func buildTableBytes(t *testing.T) []byte {
 	t.Helper()
 
 	f := &memWritableFile{}
-	builder := table.NewTableBuilder(f, util.BytewiseComparator, 4096, db.NoCompression, 16)
+	builder := table.NewTableBuilder(f, util.BytewiseComparator, 4096, db.NoCompression, 16, nil)
 	builder.Add([]byte("a"), []byte("1"))
 	builder.Add([]byte("b"), []byte("2"))
 	require.NoError(t, builder.Finish())
@@ -158,7 +158,7 @@ func TestTableCacheEvictionClosesFile(t *testing.T) {
 		},
 	}
 
-	tc := NewTableCache(dbname, env, 1, util.BytewiseComparator, nil)
+	tc := NewTableCache(dbname, env, 1, util.BytewiseComparator, nil, nil)
 
 	it1, err := tc.NewIterator(1, uint64(len(data1)))
 	require.NoError(t, err)
@@ -203,7 +203,7 @@ func TestTableCacheInUseNotEvicted(t *testing.T) {
 		},
 	}
 
-	tc := NewTableCache(dbname, env, 1, util.BytewiseComparator, nil)
+	tc := NewTableCache(dbname, env, 1, util.BytewiseComparator, nil, nil)
 
 	it1, err := tc.NewIterator(1, uint64(len(data1)))
 	require.NoError(t, err)
@@ -251,7 +251,7 @@ func TestTableCacheEvict(t *testing.T) {
 		},
 	}
 
-	tc := NewTableCache(dbname, env, 1, util.BytewiseComparator, nil)
+	tc := NewTableCache(dbname, env, 1, util.BytewiseComparator, nil, nil)
 
 	it, err := tc.NewIterator(1, uint64(len(data)))
 	require.NoError(t, err)
@@ -278,7 +278,7 @@ func TestTableCacheEvictWithOutstandingIterator(t *testing.T) {
 		},
 	}
 
-	tc := NewTableCache(dbname, env, 1, util.BytewiseComparator, nil)
+	tc := NewTableCache(dbname, env, 1, util.BytewiseComparator, nil, nil)
 
 	it, err := tc.NewIterator(1, uint64(len(data)))
 	require.NoError(t, err)

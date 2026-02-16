@@ -12,7 +12,7 @@ A Go implementation of an LSM-tree based key-value store with LevelDB-compatible
 - Snappy block compression
 - Block cache (LRU)
 - LevelDB-compatible on-disk format (WAL, MANIFEST, SSTable / `.ldb`)
-- Bloom filter is not implemented yet
+- Bloom filter
 
 ## Usage
 

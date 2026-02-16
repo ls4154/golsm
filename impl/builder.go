@@ -6,7 +6,7 @@ import (
 )
 
 func BuildTable(dbname string, env db.Env, iter db.Iterator,
-	icmp *InternalKeyComparator, options *db.Options, meta *FileMetaData,
+	icmp *InternalKeyComparator, options *db.Options, filterPolicy db.FilterPolicy, meta *FileMetaData,
 ) error {
 	iter.SeekToFirst()
 	if !iter.Valid() {
@@ -29,7 +29,7 @@ func BuildTable(dbname string, env db.Env, iter db.Iterator,
 	}()
 
 	builder := table.NewTableBuilder(f, icmp,
-		options.BlockSize, options.Compression, options.BlockRestartInterval)
+		options.BlockSize, options.Compression, options.BlockRestartInterval, filterPolicy)
 
 	meta.smallest = append([]byte(nil), iter.Key()...)
 	var key []byte

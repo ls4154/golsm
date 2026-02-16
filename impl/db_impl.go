@@ -20,6 +20,7 @@ type dbImpl struct {
 	dbname     string
 	options    *db.Options
 	icmp       *InternalKeyComparator
+	ifilter    db.FilterPolicy
 	versions   *VersionSet
 	tableCache *TableCache
 	snapshots  *SnapshotList
@@ -56,6 +57,7 @@ func Open(userOpt *db.Options, dbname string) (db.DB, error) {
 	icmp := &InternalKeyComparator{
 		userCmp: opt.Comparator,
 	}
+	ifilter := newInternalFilterPolicy(opt.FilterPolicy)
 	env := util.DefaultEnv()
 	_ = env.CreateDir(dbname)
 
@@ -68,7 +70,7 @@ func Open(userOpt *db.Options, dbname string) (db.DB, error) {
 	if opt.BlockCacheSize > 0 {
 		bcache = table.NewBlockCache(opt.BlockCacheSize)
 	}
-	tcache := NewTableCache(dbname, env, opt.MaxOpenFiles, icmp, bcache)
+	tcache := NewTableCache(dbname, env, opt.MaxOpenFiles, icmp, ifilter, bcache)
 	vset := NewVersionSet(dbname, icmp, env, tcache)
 	snapshots := NewSnapshotList()
 
@@ -76,6 +78,7 @@ func Open(userOpt *db.Options, dbname string) (db.DB, error) {
 		dbname:         dbname,
 		options:        opt,
 		icmp:           icmp,
+		ifilter:        ifilter,
 		versions:       vset,
 		tableCache:     tcache,
 		snapshots:      snapshots,
@@ -336,7 +339,7 @@ func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit, fnum uint64)
 	d.logger.Printf("Level-0 table #%d: started", meta.number)
 
 	d.mu.Unlock()
-	err := BuildTable(d.dbname, d.env, iter, d.icmp, d.options, &meta)
+	err := BuildTable(d.dbname, d.env, iter, d.icmp, d.options, d.ifilter, &meta)
 	d.mu.Lock()
 
 	d.logger.Printf("Level-0 table #%d: %d bytes %s", meta.number, meta.size, err)

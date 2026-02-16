@@ -181,7 +181,7 @@ func (d *dbImpl) NewCompactionOutputBuilder() (*table.TableBuilder, uint64, db.W
 		return nil, 0, nil, err
 	}
 
-	return table.NewTableBuilder(f, d.icmp, d.options.BlockSize, d.options.Compression, d.options.BlockRestartInterval),
+	return table.NewTableBuilder(f, d.icmp, d.options.BlockSize, d.options.Compression, d.options.BlockRestartInterval, d.ifilter),
 		fileNum, f, nil
 }
 

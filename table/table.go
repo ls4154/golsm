@@ -14,6 +14,7 @@ type Table struct {
 	cmp  db.Comparator
 
 	indexBlock *Block
+	filter     *FilterBlockReader
 	cacheID    uint64
 	blockCache *BlockCache
 }
@@ -23,6 +24,7 @@ func (t *Table) Close() error {
 	t.file = nil
 	t.cmp = nil
 	t.indexBlock = nil
+	t.filter = nil
 	return nil
 }
 
@@ -30,7 +32,9 @@ func (t *Table) GetCacheID() uint64 {
 	return t.cacheID
 }
 
-func OpenTable(file db.RandomAccessFile, size uint64, cmp db.Comparator, bcache *BlockCache, cacheID uint64) (*Table, error) {
+func OpenTable(file db.RandomAccessFile, size uint64, cmp db.Comparator, filterPolicy db.FilterPolicy,
+	bcache *BlockCache, cacheID uint64,
+) (*Table, error) {
 	// Footer
 	var buf [FooterLength]byte
 	n, err := file.ReadAt(buf[:], int64(size)-FooterLength)
@@ -51,13 +55,31 @@ func OpenTable(file db.RandomAccessFile, size uint64, cmp db.Comparator, bcache 
 		return nil, err
 	}
 
-	// TODO filter block
+	var filter *FilterBlockReader
+	if filterPolicy != nil {
+		metaindexBlock, metaErr := ReadBlock(file, &footer.MetaindexHandle)
+		if metaErr == nil {
+			metaIter := metaindexBlock.NewBlockIterator(util.BytewiseComparator)
+			metaIter.Seek([]byte("filter." + filterPolicy.Name()))
+			if metaIter.Valid() && string(metaIter.Key()) == "filter."+filterPolicy.Name() {
+				fh, _, err := DecodeBlockHandle(metaIter.Value())
+				if err == nil {
+					filterData, err := readBlockContents(file, &fh)
+					if err == nil {
+						filter = NewFilterBlockReader(filterPolicy, filterData)
+					}
+				}
+			}
+			_ = metaIter.Close()
+		}
+	}
 
 	return &Table{
 		file: file,
 		cmp:  cmp,
 
 		indexBlock: indexBlock,
+		filter:     filter,
 		cacheID:    cacheID,
 		blockCache: bcache,
 	}, nil
@@ -101,6 +123,14 @@ func (t *Table) NewBlockIteratorFromIndex(indexValue []byte) (db.Iterator, error
 }
 
 func ReadBlock(f db.RandomAccessFile, handle *BlockHandle) (*Block, error) {
+	contents, err := readBlockContents(f, handle)
+	if err != nil {
+		return nil, err
+	}
+	return NewBlock(contents)
+}
+
+func readBlockContents(f db.RandomAccessFile, handle *BlockHandle) ([]byte, error) {
 	buf := make([]byte, handle.Size+BlockTrailerSize)
 	rd, err := f.ReadAt(buf, int64(handle.Offset))
 	if err != nil {
@@ -139,7 +169,7 @@ func ReadBlock(f db.RandomAccessFile, handle *BlockHandle) (*Block, error) {
 		return nil, fmt.Errorf("%w: unknown compression type %d", db.ErrCorruption, compressionType)
 	}
 
-	return NewBlock(contents)
+	return contents, nil
 }
 
 func (t *Table) InternalGet(key []byte, handleFn func(k, v []byte)) error {
@@ -152,8 +182,9 @@ func (t *Table) InternalGet(key []byte, handleFn func(k, v []byte)) error {
 		if err != nil {
 			return fmt.Errorf("%w: bad index block handle", db.ErrCorruption)
 		}
-		_ = handle
-		// TODO filter block
+		if t.filter != nil && !t.filter.KeyMightContain(handle.Offset, key) {
+			return nil
+		}
 
 		blockIter, err := t.NewBlockIteratorFromIndex(indexValue)
 		if err != nil {

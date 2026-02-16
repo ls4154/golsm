@@ -19,6 +19,7 @@ type TableBuilder struct {
 
 	block         *BlockBuilder
 	indexBlock    *BlockBuilder
+	filterBlock   *FilterBlockBuilder
 	lastKey       []byte
 	numEntries    uint64
 	compressedBuf []byte
@@ -34,9 +35,9 @@ type TableBuilder struct {
 }
 
 func NewTableBuilder(file db.WritableFile, cmp db.Comparator, blockSize int, compression db.CompressionType,
-	restartInterval int,
+	restartInterval int, filterPolicy db.FilterPolicy,
 ) *TableBuilder {
-	return &TableBuilder{
+	b := &TableBuilder{
 		cmp:             cmp,
 		blockSize:       blockSize,
 		compression:     compression,
@@ -48,6 +49,11 @@ func NewTableBuilder(file db.WritableFile, cmp db.Comparator, blockSize int, com
 		// Index block uses restart interval 1 (no prefix compression)
 		indexBlock: NewBlockBuilder(1),
 	}
+	if filterPolicy != nil {
+		b.filterBlock = NewFilterBlockBuilder(filterPolicy)
+		b.filterBlock.StartBlock(0)
+	}
+	return b
 }
 
 func (b *TableBuilder) Add(key, value []byte) {
@@ -65,7 +71,9 @@ func (b *TableBuilder) Add(key, value []byte) {
 		b.pendingIndexEntry = false
 	}
 
-	// TODO filter block
+	if b.filterBlock != nil {
+		b.filterBlock.AddKey(key)
+	}
 
 	b.lastKey = b.lastKey[:0]
 	b.lastKey = append(b.lastKey, key...)
@@ -97,7 +105,9 @@ func (b *TableBuilder) Flush() {
 		b.err = err
 	}
 
-	// TODO filter block
+	if b.filterBlock != nil {
+		b.filterBlock.StartBlock(b.offset)
+	}
 }
 
 // block format:
@@ -179,12 +189,21 @@ func (b *TableBuilder) Finish() error {
 		return b.err
 	}
 
-	var metaindexBlockHandle, indexBlockHandle BlockHandle
+	var filterBlockHandle, metaindexBlockHandle, indexBlockHandle BlockHandle
+	hasFilterBlock := b.filterBlock != nil
+	if hasFilterBlock {
+		filterContents := b.filterBlock.Finish()
+		b.writeRawBlock(filterContents, db.NoCompression, &filterBlockHandle)
+		if b.err != nil {
+			return b.err
+		}
+	}
 
-	// TODO filter block
-
-	// metaindex block
-	metaIndexBlock := NewBlockBuilder(b.restartInterval)
+	// metaindex block uses restart interval 1 (same as LevelDB)
+	metaIndexBlock := NewBlockBuilder(1)
+	if hasFilterBlock {
+		metaIndexBlock.Add([]byte("filter."+b.filterBlock.policy.Name()), filterBlockHandle.Append(nil))
+	}
 	b.writeBlock(metaIndexBlock, &metaindexBlockHandle)
 	if b.err != nil {
 		return b.err

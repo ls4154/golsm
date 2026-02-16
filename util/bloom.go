@@ -41,7 +41,7 @@ func (b *BloomFilterPolicy) AppendFilter(keys [][]byte, dst []byte) []byte {
 	return dst
 }
 
-func (b *BloomFilterPolicy) MayMatch(key []byte, filter []byte) bool {
+func (b *BloomFilterPolicy) MightContain(key []byte, filter []byte) bool {
 	if len(filter) < 2 {
 		return false
 	}
