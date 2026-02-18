@@ -380,6 +380,12 @@ func NewVersionSet(dbname string, icmp *InternalKeyComparator, env db.Env, table
 	return vset
 }
 
+func (vs *VersionSet) Close() {
+	if vs.descriptorFile != nil {
+		vs.descriptorFile.Close()
+	}
+}
+
 func (vs *VersionSet) LogAndApply(edit *VersionEdit, dbMu *sync.Mutex) error {
 	util.AssertMutexHeld(dbMu)
 

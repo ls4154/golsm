@@ -488,6 +488,7 @@ func (d *dbImpl) GetSnapshot() db.Snapshot {
 	return s
 }
 
+// Close requires callers to release all outstanding iterators/snapshots first.
 func (d *dbImpl) Close() error {
 	d.mu.Lock()
 	if d.closed {
@@ -512,7 +513,8 @@ func (d *dbImpl) Close() error {
 		_ = d.infoLogFile.Close()
 	}
 
-	// TODO cleanup cached resources?
+	d.tableCache.Close()
+	d.versions.Close()
 
 	return nil
 }

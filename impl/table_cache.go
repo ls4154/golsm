@@ -66,6 +66,10 @@ func (tc *TableCache) NewIterator(num, size uint64) (db.Iterator, error) {
 	}), nil
 }
 
+func (tc *TableCache) Close() {
+	tc.lru.Close()
+}
+
 func (tc *TableCache) Evict(num uint64) {
 	key := make([]byte, 8)
 	binary.LittleEndian.PutUint64(key, num)
