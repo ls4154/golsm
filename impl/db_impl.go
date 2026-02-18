@@ -489,17 +489,23 @@ func (d *dbImpl) GetSnapshot() db.Snapshot {
 }
 
 func (d *dbImpl) Close() error {
-	d.logger.Printf("Closing...")
-
 	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		return nil
+	}
 	d.closed = true
 	d.mu.Unlock()
+
+	d.logger.Printf("Closing...")
 
 	d.bgWork.Close()
 	d.writeSerializer.Close()
 
-	_ = d.logfile.Sync()
-	_ = d.logfile.Close()
+	if d.logfile != nil {
+		_ = d.logfile.Sync()
+		_ = d.logfile.Close()
+	}
 
 	if d.infoLogFile != nil {
 		_ = d.infoLogFile.Flush()
