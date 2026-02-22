@@ -3,8 +3,8 @@ module github.com/ls4154/golsm
 go 1.22
 
 require (
-	github.com/golang/snappy v0.0.4
-	github.com/stretchr/testify v1.8.2
+	github.com/golang/snappy v1.0.0
+	github.com/stretchr/testify v1.11.1
 )
 
 require (
