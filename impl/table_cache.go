@@ -43,7 +43,7 @@ func NewTableCache(dbname string, env db.Env, size int, cmp db.Comparator, filte
 	}
 }
 
-func (tc *TableCache) Get(num, size uint64, key []byte, handleFn func(k, v []byte)) error {
+func (tc *TableCache) Get(num, size uint64, key []byte, handleFn func(k, v []byte), verifyChecksum bool) error {
 	handle, err := tc.findTable(num, size)
 	if err != nil {
 		return err
@@ -51,16 +51,16 @@ func (tc *TableCache) Get(num, size uint64, key []byte, handleFn func(k, v []byt
 	defer tc.lru.Release(handle)
 
 	tbl := handle.Value().table
-	return tbl.InternalGet(key, handleFn)
+	return tbl.InternalGet(key, handleFn, verifyChecksum)
 }
 
-func (tc *TableCache) NewIterator(num, size uint64) (db.Iterator, error) {
+func (tc *TableCache) NewIterator(num, size uint64, verifyChecksum bool) (db.Iterator, error) {
 	handle, err := tc.findTable(num, size)
 	if err != nil {
 		return nil, err
 	}
 	tbl := handle.Value().table
-	iter := tbl.NewIterator()
+	iter := tbl.NewIterator(verifyChecksum)
 	return newCleanupIterator(iter, func() {
 		tc.lru.Release(handle)
 	}), nil

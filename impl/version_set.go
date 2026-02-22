@@ -43,7 +43,7 @@ func (v *Version) Unref() {
 	}
 }
 
-func (v *Version) Get(lkey *LookupKey) ([]byte, error) {
+func (v *Version) Get(lkey *LookupKey, verifyChecksum bool) ([]byte, error) {
 	icmp := v.vset.icmp
 
 	done := false
@@ -84,7 +84,7 @@ func (v *Version) Get(lkey *LookupKey) ([]byte, error) {
 	})
 
 	for _, f := range l0files {
-		err := v.vset.tableCache.Get(f.number, f.size, lkey.Key(), handleResult)
+		err := v.vset.tableCache.Get(f.number, f.size, lkey.Key(), handleResult, verifyChecksum)
 		if err != nil {
 			return nil, err
 		}
@@ -117,7 +117,7 @@ func (v *Version) Get(lkey *LookupKey) ([]byte, error) {
 			continue
 		}
 
-		err := v.vset.tableCache.Get(f.number, f.size, lkey.Key(), handleResult)
+		err := v.vset.tableCache.Get(f.number, f.size, lkey.Key(), handleResult, verifyChecksum)
 		if err != nil {
 			return nil, err
 		}
@@ -136,9 +136,9 @@ func (v *Version) Get(lkey *LookupKey) ([]byte, error) {
 	return nil, db.ErrNotFound
 }
 
-func (v *Version) AddIterators(iters *[]db.Iterator) error {
+func (v *Version) AddIterators(iters *[]db.Iterator, verifyChecksum bool) error {
 	for _, f := range v.files[0] {
-		it, err := v.vset.tableCache.NewIterator(f.number, f.size)
+		it, err := v.vset.tableCache.NewIterator(f.number, f.size, verifyChecksum)
 		if err != nil {
 			return err
 		}
@@ -148,7 +148,7 @@ func (v *Version) AddIterators(iters *[]db.Iterator) error {
 
 	for lv := 1; lv < NumLevels; lv++ {
 		if len(v.files[lv]) > 0 {
-			*iters = append(*iters, v.vset.newConcatIterator(v.files[lv]))
+			*iters = append(*iters, v.vset.newConcatIterator(v.files[lv], verifyChecksum))
 		}
 	}
 
@@ -255,14 +255,14 @@ func (c *Compaction) NewInputIterator() (db.Iterator, error) {
 
 		if level == 0 {
 			for _, f := range c.inputs[i] {
-				it, err := vset.tableCache.NewIterator(f.number, f.size)
+				it, err := vset.tableCache.NewIterator(f.number, f.size, false)
 				if err != nil {
 					return nil, err
 				}
 				iters = append(iters, it)
 			}
 		} else {
-			iters = append(iters, vset.newConcatIterator(c.inputs[i]))
+			iters = append(iters, vset.newConcatIterator(c.inputs[i], false))
 		}
 	}
 
@@ -879,12 +879,10 @@ func lowerBoundFiles(icmp db.Comparator, files []*FileMetaData, key []byte) int 
 	return l
 }
 
-func (vs *VersionSet) newConcatIterator(files []*FileMetaData) db.Iterator {
-	return table.NewTwoLevelIterator(newLevelFileNumIterator(vs.icmp, files), vs.newIteratorFromFileNum)
-}
-
-func (vs *VersionSet) newIteratorFromFileNum(fileValue []byte) (db.Iterator, error) {
-	fnum := binary.LittleEndian.Uint64(fileValue[0:])
-	fsize := binary.LittleEndian.Uint64(fileValue[8:])
-	return vs.tableCache.NewIterator(fnum, fsize)
+func (vs *VersionSet) newConcatIterator(files []*FileMetaData, verifyChecksum bool) db.Iterator {
+	return table.NewTwoLevelIterator(newLevelFileNumIterator(vs.icmp, files), func(fileValue []byte) (db.Iterator, error) {
+		fnum := binary.LittleEndian.Uint64(fileValue[0:])
+		fsize := binary.LittleEndian.Uint64(fileValue[8:])
+		return vs.tableCache.NewIterator(fnum, fsize, verifyChecksum)
+	})
 }

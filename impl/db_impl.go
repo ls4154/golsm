@@ -374,8 +374,14 @@ func (d *dbImpl) Get(key []byte, options *db.ReadOptions) ([]byte, error) {
 	d.mu.Lock()
 
 	var seq uint64
-	if options != nil && options.Snapshot != nil {
-		seq = options.Snapshot.(*Snapshot).seq
+	var verifyChecksum bool
+	if options != nil {
+		if options.Snapshot != nil {
+			seq = options.Snapshot.(*Snapshot).seq
+		} else {
+			seq = d.versions.GetLastSequence()
+		}
+		verifyChecksum = options.VerifyChecksum
 	} else {
 		seq = d.versions.GetLastSequence()
 	}
@@ -403,7 +409,7 @@ func (d *dbImpl) Get(key []byte, options *db.ReadOptions) ([]byte, error) {
 	}
 	if !found {
 		var getErr error
-		value, getErr = current.Get(&lookupKey)
+		value, getErr = current.Get(&lookupKey, verifyChecksum)
 		if errors.Is(getErr, db.ErrNotFound) {
 			found = false
 		} else if getErr != nil {
@@ -470,7 +476,12 @@ func (d *dbImpl) newInternalIterator(options *db.ReadOptions) (db.Iterator, uint
 		iters = append(iters, d.imm.Iterator())
 	}
 
-	err := current.AddIterators(&iters)
+	var verifyChecksum bool
+	if options != nil {
+		verifyChecksum = options.VerifyChecksum
+	}
+
+	err := current.AddIterators(&iters, verifyChecksum)
 	if err != nil {
 		for _, it := range iters {
 			_ = it.Close()

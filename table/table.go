@@ -50,21 +50,21 @@ func OpenTable(file db.RandomAccessFile, size uint64, cmp db.Comparator, filterP
 	}
 
 	// Index block
-	indexBlock, err := ReadBlock(file, &footer.IndexHandle)
+	indexBlock, err := ReadBlock(file, &footer.IndexHandle, false)
 	if err != nil {
 		return nil, err
 	}
 
 	var filter *FilterBlockReader
 	if filterPolicy != nil {
-		metaindexBlock, metaErr := ReadBlock(file, &footer.MetaindexHandle)
+		metaindexBlock, metaErr := ReadBlock(file, &footer.MetaindexHandle, false)
 		if metaErr == nil {
 			metaIter := metaindexBlock.NewBlockIterator(util.BytewiseComparator)
 			metaIter.Seek([]byte("filter." + filterPolicy.Name()))
 			if metaIter.Valid() && string(metaIter.Key()) == "filter."+filterPolicy.Name() {
 				fh, _, err := DecodeBlockHandle(metaIter.Value())
 				if err == nil {
-					filterData, err := readBlockContents(file, &fh)
+					filterData, err := readBlockContents(file, &fh, false)
 					if err == nil {
 						filter = NewFilterBlockReader(filterPolicy, filterData)
 					}
@@ -85,11 +85,13 @@ func OpenTable(file db.RandomAccessFile, size uint64, cmp db.Comparator, filterP
 	}, nil
 }
 
-func (t *Table) NewIterator() db.Iterator {
-	return NewTwoLevelIterator(t.indexBlock.NewBlockIterator(t.cmp), t.NewBlockIteratorFromIndex)
+func (t *Table) NewIterator(verifyChecksum bool) db.Iterator {
+	return NewTwoLevelIterator(t.indexBlock.NewBlockIterator(t.cmp), func(indexValue []byte) (db.Iterator, error) {
+		return t.newBlockIteratorFromIndex(indexValue, verifyChecksum)
+	})
 }
 
-func (t *Table) NewBlockIteratorFromIndex(indexValue []byte) (db.Iterator, error) {
+func (t *Table) newBlockIteratorFromIndex(indexValue []byte, verifyChecksum bool) (db.Iterator, error) {
 	handle, _, err := DecodeBlockHandle(indexValue)
 	if err != nil {
 		return nil, err
@@ -101,14 +103,14 @@ func (t *Table) NewBlockIteratorFromIndex(indexValue []byte) (db.Iterator, error
 		bcacheKey := BuildBlockCacheKey(t.GetCacheID(), handle.Offset)
 		block, blockRelease = t.blockCache.Lookup(bcacheKey)
 		if block == nil {
-			block, err = ReadBlock(t.file, &handle)
+			block, err = ReadBlock(t.file, &handle, verifyChecksum)
 			if err != nil {
 				return nil, err
 			}
 			blockRelease = t.blockCache.Insert(bcacheKey, block)
 		}
 	} else {
-		block, err = ReadBlock(t.file, &handle)
+		block, err = ReadBlock(t.file, &handle, verifyChecksum)
 		if err != nil {
 			return nil, err
 		}
@@ -122,26 +124,25 @@ func (t *Table) NewBlockIteratorFromIndex(indexValue []byte) (db.Iterator, error
 	return it, nil
 }
 
-func ReadBlock(f db.RandomAccessFile, handle *BlockHandle) (*Block, error) {
-	contents, err := readBlockContents(f, handle)
+func ReadBlock(f db.RandomAccessFile, handle *BlockHandle, verifyChecksum bool) (*Block, error) {
+	contents, err := readBlockContents(f, handle, verifyChecksum)
 	if err != nil {
 		return nil, err
 	}
 	return NewBlock(contents)
 }
 
-func readBlockContents(f db.RandomAccessFile, handle *BlockHandle) ([]byte, error) {
+func readBlockContents(f db.RandomAccessFile, handle *BlockHandle, verifyChecksum bool) ([]byte, error) {
 	buf := make([]byte, handle.Size+BlockTrailerSize)
 	rd, err := f.ReadAt(buf, int64(handle.Offset))
 	if err != nil {
 		return nil, err
 	}
 	if rd != int(handle.Size+BlockTrailerSize) {
-		return nil, errors.New("truncated block read")
+		return nil, fmt.Errorf("%w: truncated block read", db.ErrCorruption)
 	}
 
-	// TODO verify checksum option
-	if true {
+	if verifyChecksum {
 		crc := util.UnmaskCRC32(binary.LittleEndian.Uint32(buf[handle.Size+1:]))
 
 		h := util.NewCRC32C()
@@ -149,7 +150,7 @@ func readBlockContents(f db.RandomAccessFile, handle *BlockHandle) ([]byte, erro
 		actual := h.Sum32()
 
 		if actual != crc {
-			return nil, errors.New("block checksum mismatch")
+			return nil, fmt.Errorf("%w: block checksum mismatch", db.ErrCorruption)
 		}
 	}
 
@@ -172,7 +173,7 @@ func readBlockContents(f db.RandomAccessFile, handle *BlockHandle) ([]byte, erro
 	return contents, nil
 }
 
-func (t *Table) InternalGet(key []byte, handleFn func(k, v []byte)) error {
+func (t *Table) InternalGet(key []byte, handleFn func(k, v []byte), verifyChecksum bool) error {
 	indexIter := t.indexBlock.NewBlockIterator(t.cmp)
 
 	indexIter.Seek(key)
@@ -186,7 +187,7 @@ func (t *Table) InternalGet(key []byte, handleFn func(k, v []byte)) error {
 			return nil
 		}
 
-		blockIter, err := t.NewBlockIteratorFromIndex(indexValue)
+		blockIter, err := t.newBlockIteratorFromIndex(indexValue, verifyChecksum)
 		if err != nil {
 			return err
 		}

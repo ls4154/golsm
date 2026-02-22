@@ -64,7 +64,7 @@ func readTable(t *testing.T, env db.Env, name string, numEntries int) {
 	tbl, err := OpenTable(file, size, util.BytewiseComparator, nil, nil, 0)
 	require.NoError(t, err, "failed to open table")
 
-	it := tbl.NewIterator()
+	it := tbl.NewIterator(false)
 	defer it.Close()
 	it.SeekToFirst()
 	for i := 0; i < numEntries; i++ {
