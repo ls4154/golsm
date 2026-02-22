@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/ls4154/golsm/db"
 	"github.com/ls4154/golsm/util"
@@ -135,7 +136,7 @@ func ReadBlock(f db.RandomAccessFile, handle *BlockHandle, verifyChecksum bool) 
 func readBlockContents(f db.RandomAccessFile, handle *BlockHandle, verifyChecksum bool) ([]byte, error) {
 	buf := make([]byte, handle.Size+BlockTrailerSize)
 	rd, err := f.ReadAt(buf, int64(handle.Offset))
-	if err != nil {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
 	if rd != int(handle.Size+BlockTrailerSize) {

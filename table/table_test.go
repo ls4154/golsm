@@ -130,3 +130,64 @@ func readTable(t *testing.T, env db.Env, name string, numEntries int) {
 	}
 	require.False(t, it.Valid())
 }
+
+func TestVerifyChecksumMismatch(t *testing.T) {
+	// Build table in memory.
+	tableData := buildTableDataWithPolicy(t, nil)
+
+	// Find the first data block's handle via a temporary table.
+	raf := &countingRandomAccessFile{data: tableData, reads: make(map[int64]int)}
+	tbl, err := OpenTable(raf, uint64(len(tableData)), util.BytewiseComparator, nil, nil, 0)
+	require.NoError(t, err)
+
+	it := tbl.indexBlock.NewBlockIterator(util.BytewiseComparator)
+	it.SeekToFirst()
+	require.True(t, it.Valid())
+	h, _, err := DecodeBlockHandle(it.Value())
+	require.NoError(t, err)
+	require.NoError(t, it.Close())
+
+	// Corrupt the CRC field in the block trailer (compression_type(1) + crc(4)).
+	// Flipping CRC bytes leaves the block data intact so verifyChecksum=false
+	// can still read the block successfully.
+	corrupted := make([]byte, len(tableData))
+	copy(corrupted, tableData)
+	corrupted[int(h.Offset)+int(h.Size)+1] ^= 0xFF // first byte of stored CRC
+
+	corruptedRaf := &countingRandomAccessFile{data: corrupted, reads: make(map[int64]int)}
+	corruptedTbl, err := OpenTable(corruptedRaf, uint64(len(corrupted)), util.BytewiseComparator, nil, nil, 0)
+	require.NoError(t, err)
+
+	k, _ := getTestKeyValue(0)
+
+	// verifyChecksum=true: must return ErrCorruption.
+	err = corruptedTbl.InternalGet(k, func(_, _ []byte) {}, true)
+	require.ErrorIs(t, err, db.ErrCorruption, "expected ErrCorruption, got %v", err)
+
+	// verifyChecksum=false: skips checksum, no error expected.
+	err = corruptedTbl.InternalGet(k, func(_, _ []byte) {}, false)
+	require.NoError(t, err)
+}
+
+func TestTruncatedBlockReturnsCorruption(t *testing.T) {
+	tableData := buildTableDataWithPolicy(t, nil)
+
+	// Open table to get first data block handle.
+	raf := &countingRandomAccessFile{data: tableData, reads: make(map[int64]int)}
+	tbl, err := OpenTable(raf, uint64(len(tableData)), util.BytewiseComparator, nil, nil, 0)
+	require.NoError(t, err)
+
+	it := tbl.indexBlock.NewBlockIterator(util.BytewiseComparator)
+	it.SeekToFirst()
+	require.True(t, it.Valid())
+	h, _, err := DecodeBlockHandle(it.Value())
+	require.NoError(t, err)
+	require.NoError(t, it.Close())
+
+	// Provide a file truncated mid-block so ReadBlock gets a short read (io.EOF).
+	truncated := tableData[:int(h.Offset)+int(h.Size)/2]
+	truncatedRaf := &countingRandomAccessFile{data: truncated, reads: make(map[int64]int)}
+
+	_, err = ReadBlock(truncatedRaf, &h, false)
+	require.ErrorIs(t, err, db.ErrCorruption, "expected ErrCorruption for truncated block, got %v", err)
+}
