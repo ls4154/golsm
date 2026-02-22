@@ -2,7 +2,9 @@ package impl
 
 import (
 	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/ls4154/golsm/db"
 	"github.com/stretchr/testify/require"
@@ -477,4 +479,52 @@ func TestOpenFailsWhenErrorIfExistsIsTrue(t *testing.T) {
 
 	_, err = Open(opt, testDir)
 	require.ErrorIs(t, err, db.ErrInvalidArgument)
+}
+
+func TestWriteDuringCloseDoesNotHang(t *testing.T) {
+	testDir := t.TempDir()
+	ldb, err := Open(db.DefaultOptions(), testDir)
+	require.NoError(t, err)
+
+	const workers = 32
+	startCh := make(chan struct{})
+	errCh := make(chan error, workers)
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func(i int) {
+			defer wg.Done()
+			<-startCh
+			key := []byte(fmt.Sprintf("k-%d", i))
+			errCh <- ldb.Put(key, []byte("v"), nil)
+		}(i)
+	}
+
+	close(startCh)
+	require.NoError(t, ldb.Close())
+
+	waitDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(waitDone)
+	}()
+
+	select {
+	case <-waitDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent writes did not return after Close")
+	}
+
+	close(errCh)
+	for err := range errCh {
+		if err == nil {
+			continue
+		}
+		require.ErrorContains(t, err, "db closed")
+	}
+
+	err = ldb.Put([]byte("after-close"), []byte("v"), nil)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "db closed")
 }

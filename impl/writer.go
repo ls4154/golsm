@@ -20,9 +20,11 @@ type writer struct {
 // writeSerializer runs a single goroutine that collects concurrent writes and
 // applies them as a group, reducing log I/O overhead.
 type writeSerializer struct {
-	apply    func(*WriteBatchImpl, bool) error
-	writerCh chan *writer
-	wg       sync.WaitGroup
+	apply     func(*WriteBatchImpl, bool) error
+	writerCh  chan *writer
+	wg        sync.WaitGroup
+	closeOnce sync.Once
+	closedCh  chan struct{}
 	// lastWriter holds a writer dequeued but not included in the current batch
 	// (sync mismatch or size limit) to be the first writer in the next batch.
 	lastWriter *writer
@@ -33,10 +35,13 @@ type writeSerializer struct {
 // producer/serializer rendezvous contention under concurrent writes.
 const writerQueueSize = 128
 
+var errDBClosed = errors.New("db closed")
+
 func (db *dbImpl) newWriteSerializer() *writeSerializer {
 	return &writeSerializer{
 		apply:      db.applyBatch,
 		writerCh:   make(chan *writer, writerQueueSize),
+		closedCh:   make(chan struct{}),
 		lastWriter: nil,
 		tempBatch:  NewWriteBatch(),
 	}
@@ -55,9 +60,20 @@ func (ws *writeSerializer) Write(updates db.WriteBatch, opt *db.WriteOptions) er
 		w.sync = true
 	}
 
-	ws.writerCh <- w
-	<-w.doneCh
-	return w.err
+	select {
+	case <-ws.closedCh:
+		return errDBClosed
+	case ws.writerCh <- w:
+	}
+
+	select {
+	case <-ws.closedCh:
+		// Close can race with write completion. In that window, Write may return
+		// errDBClosed even if this batch was already applied.
+		return errDBClosed
+	case <-w.doneCh:
+		return w.err
+	}
 }
 
 func (ws *writeSerializer) Run() {
@@ -67,13 +83,12 @@ func (ws *writeSerializer) Run() {
 
 func (ws *writeSerializer) main() {
 	defer ws.wg.Done()
+
 	for {
 		writers := ws.fetchWriters()
 		if len(writers) == 0 {
-			// closed
-			break
+			return
 		}
-
 		batch := ws.buildBatchGroup(writers)
 
 		err := ws.apply(batch, writers[0].sync)
@@ -90,7 +105,9 @@ func (ws *writeSerializer) main() {
 }
 
 func (ws *writeSerializer) Close() {
-	close(ws.writerCh)
+	ws.closeOnce.Do(func() {
+		close(ws.closedCh)
+	})
 	ws.wg.Wait()
 }
 
@@ -102,11 +119,12 @@ func (ws *writeSerializer) fetchWriters() []*writer {
 		first = ws.lastWriter
 		ws.lastWriter = nil
 	} else {
-		r, ok := <-ws.writerCh
-		if !ok {
+		select {
+		case <-ws.closedCh:
 			return nil
+		case r := <-ws.writerCh:
+			first = r
 		}
-		first = r
 	}
 
 	util.Assert(first != nil)
@@ -117,10 +135,7 @@ func (ws *writeSerializer) fetchWriters() []*writer {
 
 	for {
 		select {
-		case r, ok := <-ws.writerCh:
-			if !ok {
-				return writers
-			}
+		case r := <-ws.writerCh:
 			// Do not mix sync and non-sync writers in the same batch.
 			if r.sync != first.sync {
 				ws.lastWriter = r
@@ -133,6 +148,8 @@ func (ws *writeSerializer) fetchWriters() []*writer {
 				return writers
 			}
 			writers = append(writers, r)
+		case <-ws.closedCh:
+			return writers
 		default:
 			return writers
 		}
@@ -186,7 +203,7 @@ func (d *dbImpl) makeRoomForWrite(force bool) error {
 	allowDelay := !force
 	for {
 		if d.closed {
-			return errors.New("db closed")
+			return errDBClosed
 		} else if bgErr := d.GetBackgroundError(); bgErr != nil {
 			return bgErr
 		} else if allowDelay && d.versions.NumLevelFiles(0) >= L0SlowDownTrigger {

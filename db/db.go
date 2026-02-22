@@ -30,7 +30,7 @@ type DB interface {
 	// The snapshot must be released by calling Release when no longer needed.
 	GetSnapshot() Snapshot
 	// Close shuts down the database and releases all remaining resources.
-	// Callers must release all outstanding iterators and snapshots before calling Close.
+	// Callers must stop issuing new reads/writes and release all outstanding iterators/snapshots before calling Close.
 	Close() error
 }
 
