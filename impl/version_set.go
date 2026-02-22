@@ -43,7 +43,7 @@ func (v *Version) Unref() {
 	}
 }
 
-func (v *Version) Get(lkey *LookupKey, verifyChecksum bool) ([]byte, error) {
+func (v *Version) Get(lkey *LookupKey, verifyChecksum, bypassCache bool) ([]byte, error) {
 	icmp := v.vset.icmp
 
 	done := false
@@ -84,7 +84,7 @@ func (v *Version) Get(lkey *LookupKey, verifyChecksum bool) ([]byte, error) {
 	})
 
 	for _, f := range l0files {
-		err := v.vset.tableCache.Get(f.number, f.size, lkey.Key(), handleResult, verifyChecksum)
+		err := v.vset.tableCache.Get(f.number, f.size, lkey.Key(), handleResult, verifyChecksum, bypassCache)
 		if err != nil {
 			return nil, err
 		}
@@ -117,7 +117,7 @@ func (v *Version) Get(lkey *LookupKey, verifyChecksum bool) ([]byte, error) {
 			continue
 		}
 
-		err := v.vset.tableCache.Get(f.number, f.size, lkey.Key(), handleResult, verifyChecksum)
+		err := v.vset.tableCache.Get(f.number, f.size, lkey.Key(), handleResult, verifyChecksum, bypassCache)
 		if err != nil {
 			return nil, err
 		}
@@ -136,9 +136,9 @@ func (v *Version) Get(lkey *LookupKey, verifyChecksum bool) ([]byte, error) {
 	return nil, db.ErrNotFound
 }
 
-func (v *Version) AddIterators(iters *[]db.Iterator, verifyChecksum bool) error {
+func (v *Version) AddIterators(iters *[]db.Iterator, verifyChecksum, bypassCache bool) error {
 	for _, f := range v.files[0] {
-		it, err := v.vset.tableCache.NewIterator(f.number, f.size, verifyChecksum)
+		it, err := v.vset.tableCache.NewIterator(f.number, f.size, verifyChecksum, bypassCache)
 		if err != nil {
 			return err
 		}
@@ -148,7 +148,7 @@ func (v *Version) AddIterators(iters *[]db.Iterator, verifyChecksum bool) error 
 
 	for lv := 1; lv < NumLevels; lv++ {
 		if len(v.files[lv]) > 0 {
-			*iters = append(*iters, v.vset.newConcatIterator(v.files[lv], verifyChecksum))
+			*iters = append(*iters, v.vset.newConcatIterator(v.files[lv], verifyChecksum, bypassCache))
 		}
 	}
 
@@ -201,9 +201,10 @@ restart:
 }
 
 type VersionSet struct {
-	dbname     string
-	tableCache *TableCache
-	icmp       *InternalKeyComparator
+	dbname         string
+	tableCache     *TableCache
+	icmp           *InternalKeyComparator
+	paranoidChecks bool
 
 	nextFileNumber     uint64
 	manifestFileNumber uint64
@@ -241,7 +242,6 @@ func (c *Compaction) Release() {
 }
 
 func (c *Compaction) NewInputIterator() (db.Iterator, error) {
-	// TODO read opt
 	vset := c.inputVersion.vset
 
 	numIters := 2
@@ -250,19 +250,18 @@ func (c *Compaction) NewInputIterator() (db.Iterator, error) {
 	}
 	iters := make([]db.Iterator, 0, numIters)
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		level := c.level + i
-
 		if level == 0 {
 			for _, f := range c.inputs[i] {
-				it, err := vset.tableCache.NewIterator(f.number, f.size, false)
+				it, err := vset.tableCache.NewIterator(f.number, f.size, vset.paranoidChecks, true)
 				if err != nil {
 					return nil, err
 				}
 				iters = append(iters, it)
 			}
 		} else {
-			iters = append(iters, vset.newConcatIterator(c.inputs[i], false))
+			iters = append(iters, vset.newConcatIterator(c.inputs[i], vset.paranoidChecks, true))
 		}
 	}
 
@@ -295,7 +294,7 @@ func (b *VersionBuilder) Apply(edit *VersionEdit) {
 }
 
 func (b *VersionBuilder) SaveTo(v *Version) {
-	for level := 0; level < NumLevels; level++ {
+	for level := range NumLevels {
 		baseFiles := b.base.files[level]
 		v.files[level] = make([]*FileMetaData, 0, len(baseFiles)+len(b.addedFiles[level]))
 
@@ -356,11 +355,13 @@ func (b *VersionBuilder) MaybeAddFile(v *Version, level int, f *FileMetaData) {
 	v.files[level] = append(v.files[level], f)
 }
 
-func NewVersionSet(dbname string, icmp *InternalKeyComparator, env db.Env, tableCache *TableCache) *VersionSet {
+func NewVersionSet(dbname string, icmp *InternalKeyComparator, env db.Env, tableCache *TableCache,
+	paranoidChecks bool) *VersionSet {
 	vset := &VersionSet{
 		dbname:             dbname,
 		tableCache:         tableCache,
 		icmp:               icmp,
+		paranoidChecks:     paranoidChecks,
 		nextFileNumber:     2,
 		manifestFileNumber: 0,
 		lastSequence:       0,
@@ -642,7 +643,7 @@ func (vs *VersionSet) Finalize(v *Version) {
 	bestScore := float64(-1)
 
 	// last level cannot be picked as a compaction source
-	for level := 0; level < NumLevels-1; level++ {
+	for level := range NumLevels - 1 {
 		score := float64(0)
 		if level == 0 {
 			score = float64(len(v.files[level])) / L0CompactionTrigger
@@ -755,7 +756,7 @@ func (vs *VersionSet) NewBuilder(v *Version) *VersionBuilder {
 		base: v,
 	}
 
-	for i := 0; i < NumLevels; i++ {
+	for i := range NumLevels {
 		builder.deletedFiles[i] = make(map[uint64]struct{})
 	}
 
@@ -766,7 +767,7 @@ func (vs *VersionSet) LiveFiles() map[uint64]struct{} {
 	m := map[uint64]struct{}{}
 
 	for v := vs.dummyVersions.next; v != &vs.dummyVersions; v = v.next {
-		for lv := 0; lv < NumLevels; lv++ {
+		for lv := range NumLevels {
 			for _, f := range v.files[lv] {
 				m[f.number] = struct{}{}
 			}
@@ -836,8 +837,7 @@ func findLargestKey(icmp *InternalKeyComparator, files []*FileMetaData) []byte {
 	util.Assert(len(files) > 0)
 
 	largest := files[0].largest
-	for i := 0; i < len(files); i++ {
-		f := files[i]
+	for _, f := range files {
 		if icmp.Compare(f.largest, largest) > 0 {
 			largest = f.largest
 		}
@@ -879,10 +879,10 @@ func lowerBoundFiles(icmp db.Comparator, files []*FileMetaData, key []byte) int 
 	return l
 }
 
-func (vs *VersionSet) newConcatIterator(files []*FileMetaData, verifyChecksum bool) db.Iterator {
+func (vs *VersionSet) newConcatIterator(files []*FileMetaData, verifyChecksum, bypassCache bool) db.Iterator {
 	return table.NewTwoLevelIterator(newLevelFileNumIterator(vs.icmp, files), func(fileValue []byte) (db.Iterator, error) {
 		fnum := binary.LittleEndian.Uint64(fileValue[0:])
 		fsize := binary.LittleEndian.Uint64(fileValue[8:])
-		return vs.tableCache.NewIterator(fnum, fsize, verifyChecksum)
+		return vs.tableCache.NewIterator(fnum, fsize, verifyChecksum, bypassCache)
 	})
 }

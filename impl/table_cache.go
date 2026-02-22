@@ -27,7 +27,8 @@ type TableCache struct {
 	cacheID atomic.Uint64
 }
 
-func NewTableCache(dbname string, env db.Env, size int, cmp db.Comparator, filter db.FilterPolicy, bcache *table.BlockCache, paranoidChecks bool) *TableCache {
+func NewTableCache(dbname string, env db.Env, size int, cmp db.Comparator, filter db.FilterPolicy,
+	bcache *table.BlockCache, paranoidChecks bool) *TableCache {
 	lru := util.NewLRUCache[tableAndFile](size)
 	lru.SetOnEvict(func(_ []byte, v *tableAndFile) {
 		v.table.Close()
@@ -45,7 +46,7 @@ func NewTableCache(dbname string, env db.Env, size int, cmp db.Comparator, filte
 	}
 }
 
-func (tc *TableCache) Get(num, size uint64, key []byte, handleFn func(k, v []byte), verifyChecksum bool) error {
+func (tc *TableCache) Get(num, size uint64, key []byte, handleFn func(k, v []byte), verifyChecksum, bypassCache bool) error {
 	handle, err := tc.findTable(num, size)
 	if err != nil {
 		return err
@@ -53,16 +54,16 @@ func (tc *TableCache) Get(num, size uint64, key []byte, handleFn func(k, v []byt
 	defer tc.lru.Release(handle)
 
 	tbl := handle.Value().table
-	return tbl.InternalGet(key, handleFn, verifyChecksum)
+	return tbl.InternalGet(key, handleFn, verifyChecksum, bypassCache)
 }
 
-func (tc *TableCache) NewIterator(num, size uint64, verifyChecksum bool) (db.Iterator, error) {
+func (tc *TableCache) NewIterator(num, size uint64, verifyChecksum, bypassCache bool) (db.Iterator, error) {
 	handle, err := tc.findTable(num, size)
 	if err != nil {
 		return nil, err
 	}
 	tbl := handle.Value().table
-	iter := tbl.NewIterator(verifyChecksum)
+	iter := tbl.NewIterator(verifyChecksum, bypassCache)
 	return newCleanupIterator(iter, func() {
 		tc.lru.Release(handle)
 	}), nil

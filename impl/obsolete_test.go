@@ -84,7 +84,7 @@ func TestRemoveObsoleteFiles(t *testing.T) {
 		},
 	}
 
-	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{})
+	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false)
 	vset.logNumber = 4
 	vset.prevLogNumber = 0
 	v := vset.NewVersion()
@@ -119,7 +119,7 @@ func TestRemoveObsoleteFilesMultipleLogs(t *testing.T) {
 		},
 	}
 
-	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{})
+	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false)
 	vset.logNumber = 5
 	vset.prevLogNumber = 4
 	v := vset.NewVersion()
@@ -155,7 +155,7 @@ func TestRemoveObsoleteFilesMultipleLogsAndManifests(t *testing.T) {
 		},
 	}
 
-	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{})
+	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false)
 	vset.logNumber = 5
 	vset.prevLogNumber = 4
 	vset.manifestFileNumber = 6
@@ -193,7 +193,7 @@ func TestDeleteObsoleteFilesEvictsTableCache(t *testing.T) {
 	}
 
 	tc := NewTableCache(dbname, env, 10, util.BytewiseComparator, nil, nil, false)
-	it, err := tc.NewIterator(1, uint64(len(data)), false)
+	it, err := tc.NewIterator(1, uint64(len(data)), false, false)
 	require.NoError(t, err)
 	require.NoError(t, it.Close())
 	require.Equal(t, int32(0), atomic.LoadInt32(&closed))

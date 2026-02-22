@@ -104,7 +104,7 @@ func TestInternalGetUsesFilterForFastNegative(t *testing.T) {
 	called := false
 	err = tblWithFilter.InternalGet([]byte("absent-key"), func(_, _ []byte) {
 		called = true
-	}, false)
+	}, false, false)
 	require.NoError(t, err)
 	require.False(t, called)
 	require.Equal(t, before, rafWithFilter.reads[dataOffset])
@@ -116,7 +116,7 @@ func TestInternalGetUsesFilterForFastNegative(t *testing.T) {
 	dataOffsetNoFilter := firstDataBlockOffset(t, tblNoFilter)
 	beforeNoFilter := rafNoFilter.reads[dataOffsetNoFilter]
 
-	err = tblNoFilter.InternalGet([]byte("absent-key"), func(_, _ []byte) {}, false)
+	err = tblNoFilter.InternalGet([]byte("absent-key"), func(_, _ []byte) {}, false, false)
 	require.NoError(t, err)
 	require.Equal(t, beforeNoFilter+1, rafNoFilter.reads[dataOffsetNoFilter])
 }

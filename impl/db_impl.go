@@ -73,7 +73,7 @@ func Open(userOpt *db.Options, dbname string) (db.DB, error) {
 		bcache = table.NewBlockCache(opt.BlockCacheSize)
 	}
 	tcache := NewTableCache(dbname, env, opt.MaxOpenFiles, icmp, ifilter, bcache, opt.ParanoidChecks)
-	vset := NewVersionSet(dbname, icmp, env, tcache)
+	vset := NewVersionSet(dbname, icmp, env, tcache, opt.ParanoidChecks)
 	snapshots := NewSnapshotList()
 
 	db := &dbImpl{
@@ -375,6 +375,7 @@ func (d *dbImpl) Get(key []byte, options *db.ReadOptions) ([]byte, error) {
 
 	var seq uint64
 	var verifyChecksum bool
+	var bypassCache bool
 	if options != nil {
 		if options.Snapshot != nil {
 			seq = options.Snapshot.(*Snapshot).seq
@@ -382,6 +383,7 @@ func (d *dbImpl) Get(key []byte, options *db.ReadOptions) ([]byte, error) {
 			seq = d.versions.GetLastSequence()
 		}
 		verifyChecksum = options.VerifyChecksum
+		bypassCache = options.BypassCache
 	} else {
 		seq = d.versions.GetLastSequence()
 	}
@@ -409,7 +411,7 @@ func (d *dbImpl) Get(key []byte, options *db.ReadOptions) ([]byte, error) {
 	}
 	if !found {
 		var getErr error
-		value, getErr = current.Get(&lookupKey, verifyChecksum)
+		value, getErr = current.Get(&lookupKey, verifyChecksum, bypassCache)
 		if errors.Is(getErr, db.ErrNotFound) {
 			found = false
 		} else if getErr != nil {
@@ -477,11 +479,13 @@ func (d *dbImpl) newInternalIterator(options *db.ReadOptions) (db.Iterator, uint
 	}
 
 	var verifyChecksum bool
+	var bypassCache bool
 	if options != nil {
 		verifyChecksum = options.VerifyChecksum
+		bypassCache = options.BypassCache
 	}
 
-	err := current.AddIterators(&iters, verifyChecksum)
+	err := current.AddIterators(&iters, verifyChecksum, bypassCache)
 	if err != nil {
 		for _, it := range iters {
 			_ = it.Close()

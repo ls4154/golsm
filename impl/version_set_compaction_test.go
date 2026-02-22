@@ -28,7 +28,7 @@ func testFile(level int, number, size uint64, smallest, largest string) *FileMet
 }
 
 func testVersionSetForCompaction() *VersionSet {
-	return NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, nil, nil)
+	return NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, nil, nil, false)
 }
 
 func TestVersionSetNeedsCompactionL0Trigger(t *testing.T) {

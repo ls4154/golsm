@@ -160,14 +160,14 @@ func TestTableCacheEvictionClosesFile(t *testing.T) {
 
 	tc := NewTableCache(dbname, env, 1, util.BytewiseComparator, nil, nil, false)
 
-	it1, err := tc.NewIterator(1, uint64(len(data1)), false)
+	it1, err := tc.NewIterator(1, uint64(len(data1)), false, false)
 	require.NoError(t, err)
 	it1.SeekToFirst()
 	require.True(t, it1.Valid())
 	require.NoError(t, it1.Close())
 	require.Equal(t, int32(0), atomic.LoadInt32(&closed1))
 
-	it2, err := tc.NewIterator(2, uint64(len(data2)), false)
+	it2, err := tc.NewIterator(2, uint64(len(data2)), false, false)
 	require.NoError(t, err)
 	it2.SeekToFirst()
 	require.True(t, it2.Valid())
@@ -205,10 +205,10 @@ func TestTableCacheInUseNotEvicted(t *testing.T) {
 
 	tc := NewTableCache(dbname, env, 1, util.BytewiseComparator, nil, nil, false)
 
-	it1, err := tc.NewIterator(1, uint64(len(data1)), false)
+	it1, err := tc.NewIterator(1, uint64(len(data1)), false, false)
 	require.NoError(t, err)
 
-	it2, err := tc.NewIterator(2, uint64(len(data2)), false)
+	it2, err := tc.NewIterator(2, uint64(len(data2)), false, false)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		if it2 != nil {
@@ -222,7 +222,7 @@ func TestTableCacheInUseNotEvicted(t *testing.T) {
 	require.NoError(t, it1.Close())
 	it1 = nil
 
-	it3, err := tc.NewIterator(3, uint64(len(data3)), false)
+	it3, err := tc.NewIterator(3, uint64(len(data3)), false, false)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		if it3 != nil {
@@ -253,7 +253,7 @@ func TestTableCacheEvict(t *testing.T) {
 
 	tc := NewTableCache(dbname, env, 1, util.BytewiseComparator, nil, nil, false)
 
-	it, err := tc.NewIterator(1, uint64(len(data)), false)
+	it, err := tc.NewIterator(1, uint64(len(data)), false, false)
 	require.NoError(t, err)
 	require.NoError(t, it.Close())
 	require.Equal(t, int32(0), atomic.LoadInt32(&closed))
@@ -280,7 +280,7 @@ func TestTableCacheEvictWithOutstandingIterator(t *testing.T) {
 
 	tc := NewTableCache(dbname, env, 1, util.BytewiseComparator, nil, nil, false)
 
-	it, err := tc.NewIterator(1, uint64(len(data)), false)
+	it, err := tc.NewIterator(1, uint64(len(data)), false, false)
 	require.NoError(t, err)
 
 	tc.Evict(1)

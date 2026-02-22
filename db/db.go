@@ -131,8 +131,8 @@ type ReadOptions struct {
 	Snapshot Snapshot
 	// VerifyChecksum enables checksum verification during reads.
 	VerifyChecksum bool
-	// BypassCache requests cache-bypassing reads.
-	// Some implementations may support this only partially.
+	// BypassCache skips populating the block cache with data read during this operation.
+	// Useful for bulk scans that would otherwise evict more frequently accessed data.
 	BypassCache bool
 }
 

@@ -86,13 +86,13 @@ func OpenTable(file db.RandomAccessFile, size uint64, cmp db.Comparator, filterP
 	}, nil
 }
 
-func (t *Table) NewIterator(verifyChecksum bool) db.Iterator {
+func (t *Table) NewIterator(verifyChecksum, bypassCache bool) db.Iterator {
 	return NewTwoLevelIterator(t.indexBlock.NewBlockIterator(t.cmp), func(indexValue []byte) (db.Iterator, error) {
-		return t.newBlockIteratorFromIndex(indexValue, verifyChecksum)
+		return t.newBlockIteratorFromIndex(indexValue, verifyChecksum, bypassCache)
 	})
 }
 
-func (t *Table) newBlockIteratorFromIndex(indexValue []byte, verifyChecksum bool) (db.Iterator, error) {
+func (t *Table) newBlockIteratorFromIndex(indexValue []byte, verifyChecksum, bypassCache bool) (db.Iterator, error) {
 	handle, _, err := DecodeBlockHandle(indexValue)
 	if err != nil {
 		return nil, err
@@ -108,7 +108,9 @@ func (t *Table) newBlockIteratorFromIndex(indexValue []byte, verifyChecksum bool
 			if err != nil {
 				return nil, err
 			}
-			blockRelease = t.blockCache.Insert(bcacheKey, block)
+			if !bypassCache {
+				blockRelease = t.blockCache.Insert(bcacheKey, block)
+			}
 		}
 	} else {
 		block, err = ReadBlock(t.file, &handle, verifyChecksum)
@@ -174,7 +176,7 @@ func readBlockContents(f db.RandomAccessFile, handle *BlockHandle, verifyChecksu
 	return contents, nil
 }
 
-func (t *Table) InternalGet(key []byte, handleFn func(k, v []byte), verifyChecksum bool) error {
+func (t *Table) InternalGet(key []byte, handleFn func(k, v []byte), verifyChecksum, bypassCache bool) error {
 	indexIter := t.indexBlock.NewBlockIterator(t.cmp)
 
 	indexIter.Seek(key)
@@ -188,7 +190,7 @@ func (t *Table) InternalGet(key []byte, handleFn func(k, v []byte), verifyChecks
 			return nil
 		}
 
-		blockIter, err := t.newBlockIteratorFromIndex(indexValue, verifyChecksum)
+		blockIter, err := t.newBlockIteratorFromIndex(indexValue, verifyChecksum, bypassCache)
 		if err != nil {
 			return err
 		}

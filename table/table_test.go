@@ -64,7 +64,7 @@ func readTable(t *testing.T, env db.Env, name string, numEntries int) {
 	tbl, err := OpenTable(file, size, util.BytewiseComparator, nil, nil, 0, false)
 	require.NoError(t, err, "failed to open table")
 
-	it := tbl.NewIterator(false)
+	it := tbl.NewIterator(false, false)
 	defer it.Close()
 	it.SeekToFirst()
 	for i := 0; i < numEntries; i++ {
@@ -161,11 +161,11 @@ func TestVerifyChecksumMismatch(t *testing.T) {
 	k, _ := getTestKeyValue(0)
 
 	// verifyChecksum=true: must return ErrCorruption.
-	err = corruptedTbl.InternalGet(k, func(_, _ []byte) {}, true)
+	err = corruptedTbl.InternalGet(k, func(_, _ []byte) {}, true, false)
 	require.ErrorIs(t, err, db.ErrCorruption, "expected ErrCorruption, got %v", err)
 
 	// verifyChecksum=false: skips checksum, no error expected.
-	err = corruptedTbl.InternalGet(k, func(_, _ []byte) {}, false)
+	err = corruptedTbl.InternalGet(k, func(_, _ []byte) {}, false, false)
 	require.NoError(t, err)
 }
 
@@ -190,4 +190,76 @@ func TestTruncatedBlockReturnsCorruption(t *testing.T) {
 
 	_, err = ReadBlock(truncatedRaf, &h, false)
 	require.ErrorIs(t, err, db.ErrCorruption, "expected ErrCorruption for truncated block, got %v", err)
+}
+
+func TestInternalGetBypassCacheBehavior(t *testing.T) {
+	tableData := buildTableDataWithPolicy(t, nil)
+	raf := &countingRandomAccessFile{data: tableData, reads: make(map[int64]int)}
+	bcache := NewBlockCache(1 << 20)
+	tbl, err := OpenTable(raf, uint64(len(tableData)), util.BytewiseComparator, nil, bcache, 1, false)
+	require.NoError(t, err)
+
+	dataOffset := firstDataBlockOffset(t, tbl)
+	key, value := getTestKeyValue(0)
+
+	read := func(bypassCache bool) {
+		var gotValue []byte
+		err := tbl.InternalGet(key, func(_, v []byte) {
+			gotValue = append(gotValue[:0], v...)
+		}, false, bypassCache)
+		require.NoError(t, err)
+		require.Equal(t, value, gotValue)
+	}
+
+	// bypass=true on miss: do not populate block cache.
+	read(true)
+	require.Equal(t, 1, raf.reads[dataOffset])
+	read(true)
+	require.Equal(t, 2, raf.reads[dataOffset])
+
+	// bypass=false on miss: populate block cache, then hit without new file read.
+	read(false)
+	require.Equal(t, 3, raf.reads[dataOffset])
+	read(false)
+	require.Equal(t, 3, raf.reads[dataOffset])
+
+	// bypass=true still uses an existing cache hit.
+	read(true)
+	require.Equal(t, 3, raf.reads[dataOffset])
+}
+
+func TestIteratorBypassCacheBehavior(t *testing.T) {
+	tableData := buildTableDataWithPolicy(t, nil)
+	raf := &countingRandomAccessFile{data: tableData, reads: make(map[int64]int)}
+	bcache := NewBlockCache(1 << 20)
+	tbl, err := OpenTable(raf, uint64(len(tableData)), util.BytewiseComparator, nil, bcache, 1, false)
+	require.NoError(t, err)
+
+	dataOffset := firstDataBlockOffset(t, tbl)
+	key, value := getTestKeyValue(0)
+
+	readFirst := func(bypassCache bool) {
+		it := tbl.NewIterator(false, bypassCache)
+		defer it.Close()
+		it.SeekToFirst()
+		require.True(t, it.Valid())
+		require.Equal(t, key, it.Key())
+		require.Equal(t, value, it.Value())
+	}
+
+	// bypass=true on miss: do not populate block cache.
+	readFirst(true)
+	require.Equal(t, 1, raf.reads[dataOffset])
+	readFirst(true)
+	require.Equal(t, 2, raf.reads[dataOffset])
+
+	// bypass=false on miss: populate block cache, then hit without new file read.
+	readFirst(false)
+	require.Equal(t, 3, raf.reads[dataOffset])
+	readFirst(false)
+	require.Equal(t, 3, raf.reads[dataOffset])
+
+	// bypass=true still uses an existing cache hit.
+	readFirst(true)
+	require.Equal(t, 3, raf.reads[dataOffset])
 }
