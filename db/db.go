@@ -94,8 +94,10 @@ type Options struct {
 	BlockCacheSize int
 	// FilterPolicy controls filter-block creation/lookups (for example Bloom filters).
 	// Pass util.NewBloomFilterPolicy(bitsPerKey) to enable Bloom filtering.
+	// A common starting point is util.NewBloomFilterPolicy(10).
 	FilterPolicy FilterPolicy
 	// Compression sets the SSTable block compression mode.
+	// DefaultOptions uses SnappyCompression.
 	Compression CompressionType
 	// Comparator defines user-key ordering/equality semantics.
 	// If nil, util.BytewiseComparator is used.
@@ -117,7 +119,7 @@ func DefaultOptions() *Options {
 		WriteBufferSize:      4 * 1024 * 1024,
 		MaxOpenFiles:         1000,
 		BlockCacheSize:       64 << 20,
-		Compression:          NoCompression,
+		Compression:          SnappyCompression,
 	}
 }
 

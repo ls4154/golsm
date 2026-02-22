@@ -28,12 +28,10 @@ import (
 
     "github.com/ls4154/golsm"
     "github.com/ls4154/golsm/db"
-    "github.com/ls4154/golsm/util"
 )
 
 func main() {
     opt := db.DefaultOptions()
-    opt.Comparator = util.BytewiseComparator
 
     ldb, err := golsm.Open(opt, "./mydb")
     if err != nil {
