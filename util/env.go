@@ -47,7 +47,9 @@ func (b *bufWritableFile) Close() error {
 	return err2
 }
 
-type FileLock struct{}
+type FileLock struct {
+	f *os.File
+}
 
 type GenericEnv struct{}
 
@@ -142,13 +144,23 @@ func (e *GenericEnv) RemoveDir(name string) error {
 }
 
 func (e *GenericEnv) LockFile(name string) (db.FileLock, error) {
-	// TODO
-	return &FileLock{}, nil
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, osError(err)
+	}
+	if err := lockFile(f); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("%w: lock %s: %s", db.ErrIO, name, err)
+	}
+	return &FileLock{f: f}, nil
 }
 
 func (e *GenericEnv) UnlockFile(lock db.FileLock) error {
-	// TODO
-	return nil
+	fl := lock.(*FileLock)
+	if err := unlockFile(fl.f); err != nil {
+		return fmt.Errorf("%w: unlock: %s", db.ErrIO, err)
+	}
+	return fl.f.Close()
 }
 
 func osError(err error) error {

@@ -42,6 +42,8 @@ type dbImpl struct {
 	writeSerializer *writeSerializer
 	bgWork          *bgWork
 
+	fileLock db.FileLock
+
 	closed bool
 	bgErr  error
 
@@ -139,7 +141,11 @@ func (d *dbImpl) recover(edit *VersionEdit) error {
 
 	d.env.CreateDir(d.dbname)
 
-	// TODO lockfile
+	lock, err := d.env.LockFile(LockFileName(d.dbname))
+	if err != nil {
+		return fmt.Errorf("failed to acquire DB lock: %w", err)
+	}
+	d.fileLock = lock
 
 	dbExists := d.env.FileExists(CurrentFileName(d.dbname))
 	if !dbExists {
@@ -156,7 +162,7 @@ func (d *dbImpl) recover(edit *VersionEdit) error {
 		return fmt.Errorf("%w: db already exists: %s", db.ErrInvalidArgument, d.dbname)
 	}
 
-	err := d.versions.Recover()
+	err = d.versions.Recover()
 	if err != nil {
 		return err
 	}
@@ -515,6 +521,11 @@ func (d *dbImpl) Close() error {
 
 	d.tableCache.Close()
 	d.versions.Close()
+
+	if d.fileLock != nil {
+		_ = d.env.UnlockFile(d.fileLock)
+		d.fileLock = nil
+	}
 
 	return nil
 }
