@@ -4,6 +4,8 @@ import (
 	"math/rand"
 	"sync/atomic"
 	"unsafe"
+
+	"github.com/ls4154/golsm/util"
 )
 
 // Concurrency: lock-free multi-reader + externally serialized single-writer.
@@ -16,9 +18,9 @@ type SkipList struct {
 }
 
 const (
-	maxHeight   = 12
-	maxNodeSize = int(unsafe.Sizeof(node{}))
-	ptrSize     = int(unsafe.Sizeof((*node)(nil)))
+	maxHeight    = 12
+	baseNodeSize = int(unsafe.Sizeof(node{}))
+	ptrSize      = int(unsafe.Sizeof((*node)(nil)))
 )
 
 type node struct {
@@ -26,7 +28,9 @@ type node struct {
 	valuePtr *byte
 	keyLen   uint32
 	valueLen uint32
-	next     [maxHeight]*node
+	// next [maxHeight]*node -- stored immediately after this struct in memory
+	// to avoid checkptr "converted pointer straddles multiple allocations" with -race.
+	// Accessed via towerEntry/GetNext/SetNext using unsafe.Add arithmetic.
 }
 
 func NewSkipList(cmp Comparator, arena *Arena) *SkipList {
@@ -93,14 +97,13 @@ func (s *SkipList) getMaxHeight() int32 {
 }
 
 func (s *SkipList) setMaxHeight(height int32) {
+	util.Assert(height >= 1 && height <= maxHeight)
 	atomic.StoreInt32(&s.curMaxHeight, height)
 }
 
 func (s *SkipList) newNode(key, value []byte, height int32) *node {
-	// NOTE: Variable-size tail allocation is memory-efficient, but this []byte->*node
-	// cast trips checkptr under -race ("converted pointer straddles multiple allocations").
-	// Keep this for now; revisit node allocation layout to make race/checkptr-friendly.
-	size := maxNodeSize - int(maxHeight-height)*int(ptrSize)
+	util.Assert(height >= 1 && height <= maxHeight)
+	size := baseNodeSize + int(height)*ptrSize
 	node := (*node)(bytesToPtr(s.arena.AllocateAligned(size)))
 
 	if len(key) > 0 {
@@ -181,12 +184,16 @@ func (s *SkipList) randomHeight() int32 {
 	return height
 }
 
-func (n *node) GetNext(height int32) *node {
-	return (*node)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&n.next[height]))))
+func (n *node) towerEntry(h int32) *unsafe.Pointer {
+	return (*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(n), uintptr(baseNodeSize+int(h)*ptrSize)))
 }
 
-func (n *node) SetNext(height int32, node *node) {
-	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&n.next[height])), unsafe.Pointer(node))
+func (n *node) GetNext(h int32) *node {
+	return (*node)(atomic.LoadPointer(n.towerEntry(h)))
+}
+
+func (n *node) SetNext(h int32, val *node) {
+	atomic.StorePointer(n.towerEntry(h), unsafe.Pointer(val))
 }
 
 func (n *node) Key() []byte {

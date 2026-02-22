@@ -410,7 +410,7 @@ func (vs *VersionSet) LogAndApply(edit *VersionEdit, dbMu *sync.Mutex) error {
 	}
 
 	edit.SetNextFileNumber(vs.nextFileNumber)
-	edit.SetLastSequence(vs.lastSequence)
+	edit.SetLastSequence(vs.GetLastSequence())
 
 	v := vs.NewVersion()
 	builder := vs.NewBuilder(vs.current)

@@ -23,7 +23,7 @@ type LRUHandle[T any] struct {
 	inCache bool
 }
 
-func (h LRUHandle[T]) Value() T {
+func (h *LRUHandle[T]) Value() T {
 	return h.value
 }
 
