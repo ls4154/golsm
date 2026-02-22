@@ -11,9 +11,10 @@ import (
 )
 
 type writer struct {
-	batch    *WriteBatchImpl
-	resultCh chan error
-	sync     bool
+	batch  *WriteBatchImpl
+	doneCh chan struct{}
+	err    error
+	sync   bool
 }
 
 // writeSerializer runs a single goroutine that collects concurrent writes and
@@ -28,10 +29,14 @@ type writeSerializer struct {
 	tempBatch  *WriteBatchImpl
 }
 
+// writerCh buffering is optional for correctness; it mainly reduces
+// producer/serializer rendezvous contention under concurrent writes.
+const writerQueueSize = 128
+
 func (db *dbImpl) newWriteSerializer() *writeSerializer {
 	return &writeSerializer{
 		apply:      db.applyBatch,
-		writerCh:   make(chan *writer),
+		writerCh:   make(chan *writer, writerQueueSize),
 		lastWriter: nil,
 		tempBatch:  NewWriteBatch(),
 	}
@@ -43,15 +48,16 @@ func (ws *writeSerializer) Write(updates db.WriteBatch, opt *db.WriteOptions) er
 	}
 	batch := updates.(*WriteBatchImpl)
 	w := &writer{
-		batch:    batch,
-		resultCh: make(chan error, 1),
+		batch:  batch,
+		doneCh: make(chan struct{}),
 	}
 	if opt != nil && opt.Sync {
 		w.sync = true
 	}
 
 	ws.writerCh <- w
-	return <-w.resultCh
+	<-w.doneCh
+	return w.err
 }
 
 func (ws *writeSerializer) Run() {
@@ -77,7 +83,8 @@ func (ws *writeSerializer) main() {
 		}
 
 		for _, w := range writers {
-			w.resultCh <- err
+			w.err = err
+			close(w.doneCh)
 		}
 	}
 }
