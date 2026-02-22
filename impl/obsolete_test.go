@@ -192,7 +192,7 @@ func TestDeleteObsoleteFilesEvictsTableCache(t *testing.T) {
 		},
 	}
 
-	tc := NewTableCache(dbname, env, 10, util.BytewiseComparator, nil, nil)
+	tc := NewTableCache(dbname, env, 10, util.BytewiseComparator, nil, nil, false)
 	it, err := tc.NewIterator(1, uint64(len(data)), false)
 	require.NoError(t, err)
 	require.NoError(t, it.Close())

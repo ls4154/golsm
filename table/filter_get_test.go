@@ -95,7 +95,7 @@ func TestInternalGetUsesFilterForFastNegative(t *testing.T) {
 	tableData := buildTableDataWithPolicy(t, policy)
 
 	rafWithFilter := &countingRandomAccessFile{data: tableData, reads: make(map[int64]int)}
-	tblWithFilter, err := OpenTable(rafWithFilter, uint64(len(tableData)), util.BytewiseComparator, policy, nil, 1)
+	tblWithFilter, err := OpenTable(rafWithFilter, uint64(len(tableData)), util.BytewiseComparator, policy, nil, 1, false)
 	require.NoError(t, err)
 
 	dataOffset := firstDataBlockOffset(t, tblWithFilter)
@@ -110,7 +110,7 @@ func TestInternalGetUsesFilterForFastNegative(t *testing.T) {
 	require.Equal(t, before, rafWithFilter.reads[dataOffset])
 
 	rafNoFilter := &countingRandomAccessFile{data: tableData, reads: make(map[int64]int)}
-	tblNoFilter, err := OpenTable(rafNoFilter, uint64(len(tableData)), util.BytewiseComparator, nil, nil, 1)
+	tblNoFilter, err := OpenTable(rafNoFilter, uint64(len(tableData)), util.BytewiseComparator, nil, nil, 1, false)
 	require.NoError(t, err)
 
 	dataOffsetNoFilter := firstDataBlockOffset(t, tblNoFilter)

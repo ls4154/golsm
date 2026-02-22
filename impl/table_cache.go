@@ -15,10 +15,11 @@ type tableAndFile struct {
 }
 
 type TableCache struct {
-	dbname string
-	env    db.Env
-	cmp    db.Comparator
-	filter db.FilterPolicy
+	dbname         string
+	env            db.Env
+	cmp            db.Comparator
+	filter         db.FilterPolicy
+	paranoidChecks bool
 
 	lru *util.LRUCache[tableAndFile]
 
@@ -26,7 +27,7 @@ type TableCache struct {
 	cacheID atomic.Uint64
 }
 
-func NewTableCache(dbname string, env db.Env, size int, cmp db.Comparator, filter db.FilterPolicy, bcache *table.BlockCache) *TableCache {
+func NewTableCache(dbname string, env db.Env, size int, cmp db.Comparator, filter db.FilterPolicy, bcache *table.BlockCache, paranoidChecks bool) *TableCache {
 	lru := util.NewLRUCache[tableAndFile](size)
 	lru.SetOnEvict(func(_ []byte, v *tableAndFile) {
 		v.table.Close()
@@ -34,12 +35,13 @@ func NewTableCache(dbname string, env db.Env, size int, cmp db.Comparator, filte
 	})
 
 	return &TableCache{
-		dbname: dbname,
-		env:    env,
-		cmp:    cmp,
-		filter: filter,
-		lru:    lru,
-		bcache: bcache,
+		dbname:         dbname,
+		env:            env,
+		cmp:            cmp,
+		filter:         filter,
+		paranoidChecks: paranoidChecks,
+		lru:            lru,
+		bcache:         bcache,
 	}
 }
 
@@ -95,7 +97,7 @@ func (tc *TableCache) findTable(num, size uint64) (*util.LRUHandle[tableAndFile]
 	}
 
 	cacheID := tc.cacheID.Add(1)
-	tbl, err := table.OpenTable(f, size, tc.cmp, tc.filter, tc.bcache, cacheID)
+	tbl, err := table.OpenTable(f, size, tc.cmp, tc.filter, tc.bcache, cacheID, tc.paranoidChecks)
 	if err != nil {
 		_ = f.Close()
 		return nil, err

@@ -61,7 +61,7 @@ func readTable(t *testing.T, env db.Env, name string, numEntries int) {
 	size, err := env.GetFileSize(name)
 	require.NoError(t, err, "failed to get file size")
 
-	tbl, err := OpenTable(file, size, util.BytewiseComparator, nil, nil, 0)
+	tbl, err := OpenTable(file, size, util.BytewiseComparator, nil, nil, 0, false)
 	require.NoError(t, err, "failed to open table")
 
 	it := tbl.NewIterator(false)
@@ -137,7 +137,7 @@ func TestVerifyChecksumMismatch(t *testing.T) {
 
 	// Find the first data block's handle via a temporary table.
 	raf := &countingRandomAccessFile{data: tableData, reads: make(map[int64]int)}
-	tbl, err := OpenTable(raf, uint64(len(tableData)), util.BytewiseComparator, nil, nil, 0)
+	tbl, err := OpenTable(raf, uint64(len(tableData)), util.BytewiseComparator, nil, nil, 0, false)
 	require.NoError(t, err)
 
 	it := tbl.indexBlock.NewBlockIterator(util.BytewiseComparator)
@@ -155,7 +155,7 @@ func TestVerifyChecksumMismatch(t *testing.T) {
 	corrupted[int(h.Offset)+int(h.Size)+1] ^= 0xFF // first byte of stored CRC
 
 	corruptedRaf := &countingRandomAccessFile{data: corrupted, reads: make(map[int64]int)}
-	corruptedTbl, err := OpenTable(corruptedRaf, uint64(len(corrupted)), util.BytewiseComparator, nil, nil, 0)
+	corruptedTbl, err := OpenTable(corruptedRaf, uint64(len(corrupted)), util.BytewiseComparator, nil, nil, 0, false)
 	require.NoError(t, err)
 
 	k, _ := getTestKeyValue(0)
@@ -174,7 +174,7 @@ func TestTruncatedBlockReturnsCorruption(t *testing.T) {
 
 	// Open table to get first data block handle.
 	raf := &countingRandomAccessFile{data: tableData, reads: make(map[int64]int)}
-	tbl, err := OpenTable(raf, uint64(len(tableData)), util.BytewiseComparator, nil, nil, 0)
+	tbl, err := OpenTable(raf, uint64(len(tableData)), util.BytewiseComparator, nil, nil, 0, false)
 	require.NoError(t, err)
 
 	it := tbl.indexBlock.NewBlockIterator(util.BytewiseComparator)

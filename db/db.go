@@ -41,6 +41,7 @@ const (
 type Options struct {
 	CreateIfMissing      bool
 	ErrorIfExists        bool
+	ParanoidChecks       bool
 	BlockSize            int
 	BlockRestartInterval int
 	MaxFileSize          uint64

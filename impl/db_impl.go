@@ -72,7 +72,7 @@ func Open(userOpt *db.Options, dbname string) (db.DB, error) {
 	if opt.BlockCacheSize > 0 {
 		bcache = table.NewBlockCache(opt.BlockCacheSize)
 	}
-	tcache := NewTableCache(dbname, env, opt.MaxOpenFiles, icmp, ifilter, bcache)
+	tcache := NewTableCache(dbname, env, opt.MaxOpenFiles, icmp, ifilter, bcache, opt.ParanoidChecks)
 	vset := NewVersionSet(dbname, icmp, env, tcache)
 	snapshots := NewSnapshotList()
 

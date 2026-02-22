@@ -34,7 +34,7 @@ func (t *Table) GetCacheID() uint64 {
 }
 
 func OpenTable(file db.RandomAccessFile, size uint64, cmp db.Comparator, filterPolicy db.FilterPolicy,
-	bcache *BlockCache, cacheID uint64,
+	bcache *BlockCache, cacheID uint64, paranoidChecks bool,
 ) (*Table, error) {
 	// Footer
 	var buf [FooterLength]byte
@@ -51,21 +51,21 @@ func OpenTable(file db.RandomAccessFile, size uint64, cmp db.Comparator, filterP
 	}
 
 	// Index block
-	indexBlock, err := ReadBlock(file, &footer.IndexHandle, false)
+	indexBlock, err := ReadBlock(file, &footer.IndexHandle, paranoidChecks)
 	if err != nil {
 		return nil, err
 	}
 
 	var filter *FilterBlockReader
 	if filterPolicy != nil {
-		metaindexBlock, metaErr := ReadBlock(file, &footer.MetaindexHandle, false)
+		metaindexBlock, metaErr := ReadBlock(file, &footer.MetaindexHandle, paranoidChecks)
 		if metaErr == nil {
 			metaIter := metaindexBlock.NewBlockIterator(util.BytewiseComparator)
 			metaIter.Seek([]byte("filter." + filterPolicy.Name()))
 			if metaIter.Valid() && string(metaIter.Key()) == "filter."+filterPolicy.Name() {
 				fh, _, err := DecodeBlockHandle(metaIter.Value())
 				if err == nil {
-					filterData, err := readBlockContents(file, &fh, false)
+					filterData, err := readBlockContents(file, &fh, paranoidChecks)
 					if err == nil {
 						filter = NewFilterBlockReader(filterPolicy, filterData)
 					}
