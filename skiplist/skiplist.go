@@ -6,6 +6,8 @@ import (
 	"unsafe"
 )
 
+// Concurrency: lock-free multi-reader + externally serialized single-writer.
+// Readers can run concurrently with the writer and may miss in-flight inserts.
 type SkipList struct {
 	cmp          Comparator
 	arena        *Arena
@@ -45,6 +47,7 @@ func NewSkipList(cmp Comparator, arena *Arena) *SkipList {
 
 // Insert key into the list.
 // The key must be a memory allocated from Arena
+// Caller must serialize Insert calls (single writer).
 func (s *SkipList) Insert(key, value []byte) {
 	var prev [maxHeight]*node
 	_ = s.findGreaterOrEqual(key, prev[:])
@@ -94,6 +97,9 @@ func (s *SkipList) setMaxHeight(height int32) {
 }
 
 func (s *SkipList) newNode(key, value []byte, height int32) *node {
+	// NOTE: Variable-size tail allocation is memory-efficient, but this []byte->*node
+	// cast trips checkptr under -race ("converted pointer straddles multiple allocations").
+	// Keep this for now; revisit node allocation layout to make race/checkptr-friendly.
 	size := maxNodeSize - int(maxHeight-height)*int(ptrSize)
 	node := (*node)(bytesToPtr(s.arena.AllocateAligned(size)))
 
