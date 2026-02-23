@@ -9,6 +9,7 @@ import (
 
 	"github.com/ls4154/golsm"
 	"github.com/ls4154/golsm/db"
+	"github.com/ls4154/golsm/util"
 )
 
 type config struct {
@@ -19,9 +20,13 @@ type config struct {
 	valueSize        int
 	threads          int
 	writeBufferSize  int
+	blockSize        int
+	blockRestart     int
 	maxFileSize      uint64
 	cacheSize        int
 	openFiles        int
+	bloomBits        int
+	paranoidChecks   bool
 	compression      db.CompressionType
 	compressionRatio float64
 	histogram        bool
@@ -82,7 +87,11 @@ func openDB(cfg config) (db.DB, error) {
 	}
 
 	opt := db.DefaultOptions()
+	opt.CreateIfMissing = !cfg.useExistingDB
+	opt.ParanoidChecks = cfg.paranoidChecks
 	opt.WriteBufferSize = cfg.writeBufferSize
+	opt.BlockSize = cfg.blockSize
+	opt.BlockRestartInterval = cfg.blockRestart
 	opt.Compression = cfg.compression
 	if cfg.maxFileSize > 0 {
 		opt.MaxFileSize = cfg.maxFileSize
@@ -93,6 +102,9 @@ func openDB(cfg config) (db.DB, error) {
 	if cfg.openFiles > 0 {
 		opt.MaxOpenFiles = cfg.openFiles
 	}
+	if cfg.bloomBits > 0 {
+		opt.FilterPolicy = util.NewBloomFilterPolicy(cfg.bloomBits)
+	}
 
 	return golsm.Open(opt, cfg.dbPath)
 }
@@ -102,8 +114,22 @@ func printBanner(cfg config) {
 	if reads < 0 {
 		reads = cfg.num
 	}
-	fmt.Printf("dbbench: db=%s num=%d reads=%d value_size=%d threads=%d seed=%d sync=%v compression=%s compression_ratio=%.2f\n",
-		cfg.dbPath, cfg.num, reads, cfg.valueSize, cfg.threads, cfg.seed, cfg.sync, compressionName(cfg.compression), cfg.compressionRatio)
+	fmt.Printf("dbbench: db=%s num=%d reads=%d value_size=%d threads=%d seed=%d sync=%v compression=%s compression_ratio=%.2f block_size=%d block_restart_interval=%d cache_size=%d open_files=%d bloom_bits=%d paranoid_checks=%v\n",
+		cfg.dbPath,
+		cfg.num,
+		reads,
+		cfg.valueSize,
+		cfg.threads,
+		cfg.seed,
+		cfg.sync,
+		compressionName(cfg.compression),
+		cfg.compressionRatio,
+		cfg.blockSize,
+		cfg.blockRestart,
+		cfg.cacheSize,
+		cfg.openFiles,
+		cfg.bloomBits,
+		cfg.paranoidChecks)
 }
 
 func printHeader(cfg config) {
@@ -159,9 +185,13 @@ func parseFlags() config {
 	flag.IntVar(&cfg.valueSize, "value_size", 100, "value size in bytes")
 	flag.IntVar(&cfg.threads, "threads", 1, "number of worker goroutines")
 	flag.IntVar(&cfg.writeBufferSize, "write_buffer_size", def.WriteBufferSize, "db write buffer size")
+	flag.IntVar(&cfg.blockSize, "block_size", def.BlockSize, "sstable data block size")
+	flag.IntVar(&cfg.blockRestart, "block_restart_interval", def.BlockRestartInterval, "restart interval for block key compression")
 	flag.Uint64Var(&cfg.maxFileSize, "max_file_size", 0, "max table file size (0: use DB default)")
 	flag.IntVar(&cfg.cacheSize, "cache_size", -1, "block cache size in bytes (-1: use DB default)")
 	flag.IntVar(&cfg.openFiles, "open_files", 0, "max open files (0: use DB default)")
+	flag.IntVar(&cfg.bloomBits, "bloom_bits", 0, "Bloom filter bits per key (0: disable filter)")
+	flag.BoolVar(&cfg.paranoidChecks, "paranoid_checks", false, "enable paranoid checks")
 	flag.StringVar(&compression, "compression", "no", "table compression: no|snappy")
 	flag.Float64Var(&cfg.compressionRatio, "compression_ratio", 0.5, "value compression ratio for generated values")
 	flag.BoolVar(&cfg.histogram, "histogram", false, "print latency histogram percentiles")
@@ -188,11 +218,20 @@ func parseFlags() config {
 	if cfg.writeBufferSize <= 0 {
 		fatalf("write_buffer_size must be > 0")
 	}
+	if cfg.blockSize <= 0 {
+		fatalf("block_size must be > 0")
+	}
+	if cfg.blockRestart <= 0 {
+		fatalf("block_restart_interval must be > 0")
+	}
 	if cfg.maxFileSize > 0 && cfg.maxFileSize < 1024 {
 		fatalf("max_file_size must be >= 1024 when specified")
 	}
 	if cfg.openFiles < 0 {
 		fatalf("open_files must be >= 0")
+	}
+	if cfg.bloomBits < 0 {
+		fatalf("bloom_bits must be >= 0")
 	}
 	if cfg.compressionRatio <= 0 {
 		fatalf("compression_ratio must be > 0")

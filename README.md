@@ -84,10 +84,10 @@ func main() {
 
 ```bash
 go run ./cmd/dbbench \
-    -benchmarks=fillseq,fillrandom,readseq,readrandom \
-    -num=100000 \
-    -value_size=100 \
-    -db=./bench-db
+    -benchmarks=fillseq,overwrite,readseq,readreverse,readrandom \
+    -num=1000000 -threads=4 -value_size=100 -write_buffer_size=4194304 -max_file_size=4194304 \
+    -cache_size=67108864 -compression=snappy -bloom_bits=10 \
+    -db=./bench-db -histogram=1
 ```
 
 ## License

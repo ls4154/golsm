@@ -16,10 +16,14 @@ func runBenchmark(ldb db.DB, cfg config, spec benchSpec) (runResult, error) {
 		return runFillSeq(ldb, cfg), nil
 	case "fillrandom":
 		return runFillRandom(ldb, cfg), nil
+	case "overwrite":
+		return runOverwrite(ldb, cfg), nil
 	case "readrandom":
 		return runReadRandom(ldb, cfg), nil
 	case "readseq":
 		return runReadSeq(ldb, cfg), nil
+	case "readreverse":
+		return runReadReverse(ldb, cfg), nil
 	default:
 		return runResult{}, fmt.Errorf("unknown benchmark %q", spec.name)
 	}
@@ -95,6 +99,10 @@ func runFillRandom(ldb db.DB, cfg config) runResult {
 	return finalizeResult(requested, merged.ops, merged.errors, 0, merged.bytes, time.Since(start), merged.elapsed, merged.hist)
 }
 
+func runOverwrite(ldb db.DB, cfg config) runResult {
+	return runFillRandom(ldb, cfg)
+}
+
 func runReadRandom(ldb db.DB, cfg config) runResult {
 	readsPerThread := readsPerThread(cfg)
 	start := time.Now()
@@ -154,6 +162,59 @@ func runReadSeq(ldb db.DB, cfg config) runResult {
 			value := iter.Value()
 			wr.bytes += int64(len(key) + len(value))
 			iter.Next()
+			wr.hist.Observe(time.Since(t0))
+			return true
+		},
+		func(workerID int, wr *workerResult) {
+			iter := iters[workerID]
+			if iter == nil {
+				return
+			}
+			if err := iter.Error(); err != nil {
+				wr.errors++
+			}
+			if err := iter.Close(); err != nil {
+				wr.errors++
+			}
+		},
+	)
+
+	requested := int64(readsPerThread) * int64(cfg.threads)
+	misses := requested - merged.ops
+	if misses < 0 {
+		misses = 0
+	}
+	return finalizeResult(requested, merged.ops, merged.errors, misses, merged.bytes, time.Since(start), merged.elapsed, merged.hist)
+}
+
+func runReadReverse(ldb db.DB, cfg config) runResult {
+	readsPerThread := readsPerThread(cfg)
+	start := time.Now()
+	iters := make([]db.Iterator, cfg.threads)
+
+	merged := runWorkers(readsPerThread, cfg.threads, cfg.seed,
+		func(workerID int, _ int, wr *workerResult, _ *rand.Rand) bool {
+			iter := iters[workerID]
+			if iter == nil {
+				var err error
+				iter, err = ldb.NewIterator(nil)
+				if err != nil {
+					wr.errors++
+					return false
+				}
+				iter.SeekToLast()
+				iters[workerID] = iter
+			}
+
+			if !iter.Valid() {
+				return false
+			}
+
+			t0 := time.Now()
+			key := iter.Key()
+			value := iter.Value()
+			wr.bytes += int64(len(key) + len(value))
+			iter.Prev()
 			wr.hist.Observe(time.Since(t0))
 			return true
 		},
