@@ -27,7 +27,7 @@ type dbImpl struct {
 	// tracks file numbers currently being written by compaction or flush
 	// protecting them from being deleted by obsolete file cleanup
 	// before they are registered in the version set.
-	pendingOutputs map[uint64]struct{}
+	pendingOutputs map[FileNumber]struct{}
 	// current active memtable
 	mem *MemTable
 	// immutable memtable being flushed to level-0
@@ -36,7 +36,7 @@ type dbImpl struct {
 	env         db.Env
 	log         *log.Writer
 	logfile     db.WritableFile
-	logfileNum  uint64
+	logfileNum  FileNumber
 	infoLogFile db.WritableFile
 
 	writeSerializer *writeSerializer
@@ -84,7 +84,7 @@ func Open(userOpt *db.Options, dbname string) (db.DB, error) {
 		versions:       vset,
 		tableCache:     tcache,
 		snapshots:      snapshots,
-		pendingOutputs: make(map[uint64]struct{}),
+		pendingOutputs: make(map[FileNumber]struct{}),
 		mem:            nil,
 		env:            env,
 
@@ -167,7 +167,7 @@ func (d *dbImpl) recover(edit *VersionEdit) error {
 		return err
 	}
 
-	maxSequence := uint64(0)
+	maxSequence := SequenceNumber(0)
 
 	minLog := d.versions.logNumber
 	prevLog := d.versions.prevLogNumber
@@ -178,7 +178,7 @@ func (d *dbImpl) recover(edit *VersionEdit) error {
 	}
 
 	expected := d.versions.LiveFiles()
-	logs := []uint64{}
+	logs := []FileNumber{}
 
 	for _, fname := range filenames {
 		if ftype, num, ok := ParseFileName(fname); ok {
@@ -213,7 +213,7 @@ func (d *dbImpl) recover(edit *VersionEdit) error {
 	return nil
 }
 
-func (d *dbImpl) RecoverLogFile(logNum uint64, last bool, edit *VersionEdit, maxSeq *uint64) error {
+func (d *dbImpl) RecoverLogFile(logNum FileNumber, last bool, edit *VersionEdit, maxSeq *SequenceNumber) error {
 	util.AssertMutexHeld(&d.mu)
 
 	d.logger.Printf("recovering log %d", logNum)
@@ -255,7 +255,7 @@ func (d *dbImpl) RecoverLogFile(logNum uint64, last bool, edit *VersionEdit, max
 			break
 		}
 
-		lastSeq := batch.sequence() + uint64(batch.count()) - 1
+		lastSeq := batch.sequence() + SequenceNumber(batch.count()) - 1
 		if lastSeq > *maxSeq {
 			*maxSeq = lastSeq
 		}
@@ -329,7 +329,7 @@ func (d *dbImpl) newDB() error {
 	return SetCurrentFile(d.env, d.dbname, 1)
 }
 
-func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit, fnum uint64) error {
+func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit, fnum FileNumber) error {
 	util.AssertMutexHeld(&d.mu)
 
 	// TODO stats
@@ -358,7 +358,7 @@ func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit, fnum uint64)
 		return nil
 	}
 
-	level := 0
+	level := Level(0)
 
 	// TODO pick level
 
@@ -373,7 +373,7 @@ func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit, fnum uint64)
 func (d *dbImpl) Get(key []byte, options *db.ReadOptions) ([]byte, error) {
 	d.mu.Lock()
 
-	var seq uint64
+	var seq SequenceNumber
 	var verifyChecksum bool
 	var bypassCache bool
 	if options != nil {
@@ -455,7 +455,7 @@ func (d *dbImpl) NewIterator(options *db.ReadOptions) (db.Iterator, error) {
 	if err != nil {
 		return nil, err
 	}
-	var seq uint64
+	var seq SequenceNumber
 	if options != nil && options.Snapshot != nil {
 		seq = options.Snapshot.(*Snapshot).seq
 	} else {
@@ -464,7 +464,7 @@ func (d *dbImpl) NewIterator(options *db.ReadOptions) (db.Iterator, error) {
 	return newDBIter(internalIter, d.icmp.userCmp, seq), nil
 }
 
-func (d *dbImpl) newInternalIterator(options *db.ReadOptions) (db.Iterator, uint64, error) {
+func (d *dbImpl) newInternalIterator(options *db.ReadOptions) (db.Iterator, SequenceNumber, error) {
 	iters := make([]db.Iterator, 0, 4)
 
 	d.mu.Lock()
@@ -558,7 +558,7 @@ func openInfoLogger(env db.Env, dbname string, logger db.Logger) (db.Logger, db.
 	return stdlog.New(f, "", stdlog.LstdFlags), f, nil
 }
 
-func SetCurrentFile(env db.Env, dbname string, num uint64) error {
+func SetCurrentFile(env db.Env, dbname string, num FileNumber) error {
 	manifest := DescriptorFileName(dbname, num)
 	contents := filepath.Base(manifest)
 
@@ -593,7 +593,7 @@ func SetCurrentFile(env db.Env, dbname string, num uint64) error {
 	return nil
 }
 
-func (d *dbImpl) RegisterPendingOutput(fnum uint64) {
+func (d *dbImpl) RegisterPendingOutput(fnum FileNumber) {
 	util.AssertMutexHeld(&d.mu)
 
 	util.AssertFunc(func() bool {
@@ -604,7 +604,7 @@ func (d *dbImpl) RegisterPendingOutput(fnum uint64) {
 	d.pendingOutputs[fnum] = struct{}{}
 }
 
-func (d *dbImpl) UnregisterPendingOutput(fnum uint64) {
+func (d *dbImpl) UnregisterPendingOutput(fnum FileNumber) {
 	util.AssertMutexHeld(&d.mu)
 
 	util.AssertFunc(func() bool {

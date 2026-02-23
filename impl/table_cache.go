@@ -46,7 +46,7 @@ func NewTableCache(dbname string, env db.Env, size int, cmp db.Comparator, filte
 	}
 }
 
-func (tc *TableCache) Get(num, size uint64, key []byte, handleFn func(k, v []byte), verifyChecksum, bypassCache bool) error {
+func (tc *TableCache) Get(num FileNumber, size uint64, key []byte, handleFn func(k, v []byte), verifyChecksum, bypassCache bool) error {
 	handle, err := tc.findTable(num, size)
 	if err != nil {
 		return err
@@ -57,7 +57,7 @@ func (tc *TableCache) Get(num, size uint64, key []byte, handleFn func(k, v []byt
 	return tbl.InternalGet(key, handleFn, verifyChecksum, bypassCache)
 }
 
-func (tc *TableCache) NewIterator(num, size uint64, verifyChecksum, bypassCache bool) (db.Iterator, error) {
+func (tc *TableCache) NewIterator(num FileNumber, size uint64, verifyChecksum, bypassCache bool) (db.Iterator, error) {
 	handle, err := tc.findTable(num, size)
 	if err != nil {
 		return nil, err
@@ -73,15 +73,15 @@ func (tc *TableCache) Close() {
 	tc.lru.Close()
 }
 
-func (tc *TableCache) Evict(num uint64) {
+func (tc *TableCache) Evict(num FileNumber) {
 	key := make([]byte, 8)
-	binary.LittleEndian.PutUint64(key, num)
+	binary.LittleEndian.PutUint64(key, uint64(num))
 	tc.lru.Erase(key)
 }
 
-func (tc *TableCache) findTable(num, size uint64) (*util.LRUHandle[tableAndFile], error) {
+func (tc *TableCache) findTable(num FileNumber, size uint64) (*util.LRUHandle[tableAndFile], error) {
 	key := make([]byte, 8)
-	binary.LittleEndian.PutUint64(key, num)
+	binary.LittleEndian.PutUint64(key, uint64(num))
 
 	if h := tc.lru.Lookup(key); h != nil {
 		return h, nil

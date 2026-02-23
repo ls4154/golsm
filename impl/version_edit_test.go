@@ -13,10 +13,10 @@ func TestVersionEdit(t *testing.T) {
 	edit.SetLogNumber(12345)
 	edit.SetLastSequence(9999999)
 	for i := 0; i < 3; i++ {
-		edit.RemoveFile(uint64(1000+i), i)
+		edit.RemoveFile(FileNumber(1000+i), Level(i))
 	}
 	for i := 0; i < 6; i++ {
-		edit.RemoveFile(uint64(2000+i), i)
+		edit.RemoveFile(FileNumber(2000+i), Level(i))
 	}
 
 	encoded := edit.Append(nil)

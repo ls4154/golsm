@@ -60,7 +60,7 @@ func (it *levelFileNumIterator) Valid() bool {
 }
 
 func (it *levelFileNumIterator) Value() []byte {
-	binary.LittleEndian.PutUint64(it.valueBuf[0:], it.files[it.idx].number)
+	binary.LittleEndian.PutUint64(it.valueBuf[0:], uint64(it.files[it.idx].number))
 	binary.LittleEndian.PutUint64(it.valueBuf[8:], it.files[it.idx].size)
 	return it.valueBuf[:]
 }

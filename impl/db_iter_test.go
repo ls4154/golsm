@@ -26,7 +26,7 @@ func (it *corruptInternalIterator) String() string         { return "corrupt-int
 func (it *corruptInternalIterator) RegisterCleanup(func()) {}
 
 func buildInternalKeys(t *testing.T, entries []struct {
-	seq uint64
+	seq SequenceNumber
 	typ ValueType
 	key string
 	val string
@@ -56,7 +56,7 @@ func collectIter(it *dbIter) (keys []string, values []string) {
 
 func TestDBIterRespectsSnapshotSeq(t *testing.T) {
 	iter := buildInternalKeys(t, []struct {
-		seq uint64
+		seq SequenceNumber
 		typ ValueType
 		key string
 		val string
@@ -89,7 +89,7 @@ func TestDBIterRespectsSnapshotSeq(t *testing.T) {
 
 func TestDBIterDeletionSkipsKey(t *testing.T) {
 	iter := buildInternalKeys(t, []struct {
-		seq uint64
+		seq SequenceNumber
 		typ ValueType
 		key string
 		val string
@@ -109,7 +109,7 @@ func TestDBIterDeletionSkipsKey(t *testing.T) {
 
 func TestDBIterDirectionSwitchAroundSeek(t *testing.T) {
 	iter := buildInternalKeys(t, []struct {
-		seq uint64
+		seq SequenceNumber
 		typ ValueType
 		key string
 		val string
@@ -147,7 +147,7 @@ func TestDBIterDirectionSwitchAroundSeek(t *testing.T) {
 
 func TestDBIterSnapshotBoundary(t *testing.T) {
 	iter := buildInternalKeys(t, []struct {
-		seq uint64
+		seq SequenceNumber
 		typ ValueType
 		key string
 		val string
@@ -183,7 +183,7 @@ func TestDBIterSnapshotBoundary(t *testing.T) {
 
 func TestDBIterSeekBoundary(t *testing.T) {
 	iter := buildInternalKeys(t, []struct {
-		seq uint64
+		seq SequenceNumber
 		typ ValueType
 		key string
 		val string
@@ -217,7 +217,7 @@ func TestDBIterSeekBoundary(t *testing.T) {
 
 func TestDBIterMergedSourcesLatestWins(t *testing.T) {
 	source1 := buildInternalKeys(t, []struct {
-		seq uint64
+		seq SequenceNumber
 		typ ValueType
 		key string
 		val string
@@ -227,7 +227,7 @@ func TestDBIterMergedSourcesLatestWins(t *testing.T) {
 		{seq: 2, typ: TypeValue, key: "d", val: "d2"},
 	})
 	source2 := buildInternalKeys(t, []struct {
-		seq uint64
+		seq SequenceNumber
 		typ ValueType
 		key string
 		val string
@@ -256,7 +256,7 @@ func TestDBIterMergedSourcesLatestWins(t *testing.T) {
 
 func TestDBIterPrevSkipsOlderVersionOfSameUserKey(t *testing.T) {
 	iter := buildInternalKeys(t, []struct {
-		seq uint64
+		seq SequenceNumber
 		typ ValueType
 		key string
 		val string
@@ -284,7 +284,7 @@ func TestDBIterPrevSkipsOlderVersionOfSameUserKey(t *testing.T) {
 
 func TestDBIterReverseFullTraversal(t *testing.T) {
 	iter := buildInternalKeys(t, []struct {
-		seq uint64
+		seq SequenceNumber
 		typ ValueType
 		key string
 		val string
@@ -312,7 +312,7 @@ func TestDBIterReverseFullTraversal(t *testing.T) {
 
 func TestDBIterReverseWithDeletion(t *testing.T) {
 	iter := buildInternalKeys(t, []struct {
-		seq uint64
+		seq SequenceNumber
 		typ ValueType
 		key string
 		val string
@@ -369,7 +369,7 @@ func TestDBIterCorruptionOnSeek(t *testing.T) {
 
 func TestDBIterNoErrorOnNormalPath(t *testing.T) {
 	iter := buildInternalKeys(t, []struct {
-		seq uint64
+		seq SequenceNumber
 		typ ValueType
 		key string
 		val string
@@ -389,7 +389,7 @@ func TestDBIterNoErrorOnNormalPath(t *testing.T) {
 
 func TestDBIterDoubleClose(t *testing.T) {
 	iter := buildInternalKeys(t, []struct {
-		seq uint64
+		seq SequenceNumber
 		typ ValueType
 		key string
 		val string
@@ -404,7 +404,7 @@ func TestDBIterDoubleClose(t *testing.T) {
 
 func TestDBIterEmptySource(t *testing.T) {
 	iter := buildInternalKeys(t, []struct {
-		seq uint64
+		seq SequenceNumber
 		typ ValueType
 		key string
 		val string

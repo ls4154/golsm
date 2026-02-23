@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func compactionInternalKey(user string, seq uint64) []byte {
+func compactionInternalKey(user string, seq SequenceNumber) []byte {
 	key := []byte(user)
 	out := make([]byte, 0, len(key)+8)
 	out = append(out, key...)
@@ -17,7 +17,7 @@ func compactionInternalKey(user string, seq uint64) []byte {
 	return out
 }
 
-func testFile(level int, number, size uint64, smallest, largest string) *FileMetaData {
+func testFile(level Level, number FileNumber, size uint64, smallest, largest string) *FileMetaData {
 	return &FileMetaData{
 		number:   number,
 		size:     size,
@@ -44,7 +44,7 @@ func TestVersionSetNeedsCompactionL0Trigger(t *testing.T) {
 	vs.Finalize(v)
 	vs.AppendVersion(v)
 
-	require.Equal(t, 0, v.compactionLevel)
+	require.Equal(t, Level(0), v.compactionLevel)
 	require.Equal(t, float64(1), v.compactionScore)
 	require.True(t, vs.NeedsCompaction())
 }
@@ -59,7 +59,7 @@ func TestVersionSetNeedsCompactionBySize(t *testing.T) {
 	vs.Finalize(v)
 	vs.AppendVersion(v)
 
-	require.Equal(t, 1, v.compactionLevel)
+	require.Equal(t, Level(1), v.compactionLevel)
 	require.Greater(t, v.compactionScore, float64(1))
 	require.True(t, vs.NeedsCompaction())
 }
@@ -83,9 +83,9 @@ func TestVersionSetPickCompactionL0(t *testing.T) {
 	c := vs.PickCompaction()
 	defer c.Release()
 	require.NotNil(t, c)
-	require.Equal(t, 0, c.level)
-	require.Equal(t, []uint64{1, 2}, []uint64{c.inputs[0][0].number, c.inputs[0][1].number})
-	require.Equal(t, []uint64{11}, []uint64{c.inputs[1][0].number})
+	require.Equal(t, Level(0), c.level)
+	require.Equal(t, []FileNumber{1, 2}, []FileNumber{c.inputs[0][0].number, c.inputs[0][1].number})
+	require.Equal(t, []FileNumber{11}, []FileNumber{c.inputs[1][0].number})
 	require.Equal(t, f2.largest, vs.compactPointer[0])
 }
 
@@ -110,9 +110,9 @@ func TestVersionSetPickCompactionUsesCompactPointer(t *testing.T) {
 	c := vs.PickCompaction()
 	defer c.Release()
 	require.NotNil(t, c)
-	require.Equal(t, 1, c.level)
-	require.Equal(t, []uint64{2}, []uint64{c.inputs[0][0].number})
-	require.Equal(t, []uint64{21, 22}, []uint64{c.inputs[1][0].number, c.inputs[1][1].number})
+	require.Equal(t, Level(1), c.level)
+	require.Equal(t, []FileNumber{2}, []FileNumber{c.inputs[0][0].number})
+	require.Equal(t, []FileNumber{21, 22}, []FileNumber{c.inputs[1][0].number, c.inputs[1][1].number})
 	require.Equal(t, f2.largest, vs.compactPointer[1])
 }
 
@@ -133,9 +133,9 @@ func TestVersionSetCompactPointerWrapsAround(t *testing.T) {
 	c := vs.PickCompaction()
 	defer c.Release()
 	require.NotNil(t, c)
-	require.Equal(t, 1, c.level)
+	require.Equal(t, Level(1), c.level)
 	// Should fall back to first file
-	require.Equal(t, uint64(1), c.inputs[0][0].number)
+	require.Equal(t, FileNumber(1), c.inputs[0][0].number)
 }
 
 func TestPickCompactionReturnsNilWhenNotNeeded(t *testing.T) {
@@ -222,8 +222,8 @@ func TestAddBoundaryInputs(t *testing.T) {
 
 	// f2 should be added because its smallest has the same user key "b" as f1's largest
 	require.Len(t, compactionFiles, 2)
-	require.Equal(t, uint64(1), compactionFiles[0].number)
-	require.Equal(t, uint64(2), compactionFiles[1].number)
+	require.Equal(t, FileNumber(1), compactionFiles[0].number)
+	require.Equal(t, FileNumber(2), compactionFiles[1].number)
 }
 
 func TestAddBoundaryInputsNoBoundary(t *testing.T) {
@@ -267,11 +267,11 @@ func TestGetOverlappingFilesL0Expands(t *testing.T) {
 
 	// Should expand to include f2 (overlaps with a-c) and f3 (overlaps with expanded range a-e)
 	require.Len(t, result, 3)
-	nums := make([]uint64, len(result))
+	nums := make([]FileNumber, len(result))
 	for i, f := range result {
 		nums[i] = f.number
 	}
-	require.ElementsMatch(t, []uint64{1, 2, 3}, nums)
+	require.ElementsMatch(t, []FileNumber{1, 2, 3}, nums)
 }
 
 func TestFinalizeExcludesLastLevel(t *testing.T) {
@@ -285,7 +285,7 @@ func TestFinalizeExcludesLastLevel(t *testing.T) {
 	vs.Finalize(v)
 
 	// Last level should never be chosen as compaction source
-	require.NotEqual(t, NumLevels-1, v.compactionLevel)
+	require.NotEqual(t, Level(NumLevels-1), v.compactionLevel)
 	require.Less(t, v.compactionScore, float64(1))
 }
 
@@ -311,6 +311,6 @@ func TestFinalizePicksHighestScoreLevel(t *testing.T) {
 
 	vs.Finalize(v)
 
-	require.Equal(t, 1, v.compactionLevel)
+	require.Equal(t, Level(1), v.compactionLevel)
 	require.InDelta(t, 1.5, v.compactionScore, 0.01)
 }

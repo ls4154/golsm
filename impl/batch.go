@@ -44,12 +44,12 @@ func (b *WriteBatchImpl) clear() {
 	}
 }
 
-func (b *WriteBatchImpl) sequence() uint64 {
-	return binary.LittleEndian.Uint64(b.rep[0:8])
+func (b *WriteBatchImpl) sequence() SequenceNumber {
+	return SequenceNumber(binary.LittleEndian.Uint64(b.rep[0:8]))
 }
 
-func (b *WriteBatchImpl) setSequence(seq uint64) {
-	binary.LittleEndian.PutUint64(b.rep[0:8], seq)
+func (b *WriteBatchImpl) setSequence(seq SequenceNumber) {
+	binary.LittleEndian.PutUint64(b.rep[0:8], uint64(seq))
 }
 
 func (b *WriteBatchImpl) count() uint32 {

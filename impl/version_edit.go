@@ -21,29 +21,29 @@ const (
 )
 
 type FileMetaData struct {
-	number   uint64
+	number   FileNumber
 	size     uint64
 	smallest []byte
 	largest  []byte
-	level    int
+	level    Level
 }
 
 type DeletedFile struct {
-	number uint64
-	level  int
+	number FileNumber
+	level  Level
 }
 
 type CompactPointer struct {
-	level       int
+	level       Level
 	internalKey []byte
 }
 
 type VersionEdit struct {
 	comparator        string
-	logNumber         uint64
-	prevLogNumber     uint64
-	nextFileNumber    uint64
-	lastSequence      uint64
+	logNumber         FileNumber
+	prevLogNumber     FileNumber
+	nextFileNumber    FileNumber
+	lastSequence      SequenceNumber
 	hasComparator     bool
 	hasLogNumber      bool
 	hasPrevLogNumber  bool
@@ -60,41 +60,41 @@ func (ve *VersionEdit) SetComparator(comparator string) {
 	ve.hasComparator = true
 }
 
-func (ve *VersionEdit) SetLogNumber(logNumber uint64) {
+func (ve *VersionEdit) SetLogNumber(logNumber FileNumber) {
 	ve.logNumber = logNumber
 	ve.hasLogNumber = true
 }
 
-func (ve *VersionEdit) SetPrevLogNumber(prevLogNumber uint64) {
+func (ve *VersionEdit) SetPrevLogNumber(prevLogNumber FileNumber) {
 	ve.prevLogNumber = prevLogNumber
 	ve.hasPrevLogNumber = true
 }
 
-func (ve *VersionEdit) SetNextFileNumber(nextFileNumber uint64) {
+func (ve *VersionEdit) SetNextFileNumber(nextFileNumber FileNumber) {
 	ve.nextFileNumber = nextFileNumber
 	ve.hasNextFileNumber = true
 }
 
-func (ve *VersionEdit) SetLastSequence(lastSequence uint64) {
+func (ve *VersionEdit) SetLastSequence(lastSequence SequenceNumber) {
 	ve.lastSequence = lastSequence
 	ve.hasLastSequence = true
 }
 
-func (ve *VersionEdit) SetCompactPointer(level int, internalKey []byte) {
+func (ve *VersionEdit) SetCompactPointer(level Level, internalKey []byte) {
 	ve.compactPointers = append(ve.compactPointers, CompactPointer{
 		level:       level,
 		internalKey: append([]byte(nil), internalKey...),
 	})
 }
 
-func (ve *VersionEdit) RemoveFile(number uint64, level int) {
+func (ve *VersionEdit) RemoveFile(number FileNumber, level Level) {
 	if ve.deletedFiles == nil {
 		ve.deletedFiles = make(map[DeletedFile]struct{})
 	}
 	ve.deletedFiles[DeletedFile{number: number, level: level}] = struct{}{}
 }
 
-func (ve *VersionEdit) AddFile(level int, number, size uint64, smallest, largest []byte) {
+func (ve *VersionEdit) AddFile(level Level, number FileNumber, size uint64, smallest, largest []byte) {
 	ve.newFiles = append(ve.newFiles, FileMetaData{
 		number:   number,
 		size:     size,
@@ -111,19 +111,19 @@ func (ve *VersionEdit) Append(dst []byte) []byte {
 	}
 	if ve.hasLogNumber {
 		dst = binary.AppendUvarint(dst, TagLogNumber)
-		dst = binary.AppendUvarint(dst, ve.logNumber)
+		dst = binary.AppendUvarint(dst, uint64(ve.logNumber))
 	}
 	if ve.hasPrevLogNumber {
 		dst = binary.AppendUvarint(dst, TagPrevLogNumber)
-		dst = binary.AppendUvarint(dst, ve.prevLogNumber)
+		dst = binary.AppendUvarint(dst, uint64(ve.prevLogNumber))
 	}
 	if ve.hasNextFileNumber {
 		dst = binary.AppendUvarint(dst, TagNextFileNumber)
-		dst = binary.AppendUvarint(dst, ve.nextFileNumber)
+		dst = binary.AppendUvarint(dst, uint64(ve.nextFileNumber))
 	}
 	if ve.hasLastSequence {
 		dst = binary.AppendUvarint(dst, TagLastSequence)
-		dst = binary.AppendUvarint(dst, ve.lastSequence)
+		dst = binary.AppendUvarint(dst, uint64(ve.lastSequence))
 	}
 	for _, c := range ve.compactPointers {
 		dst = binary.AppendUvarint(dst, TagCompactPointer)
@@ -133,12 +133,12 @@ func (ve *VersionEdit) Append(dst []byte) []byte {
 	for df := range ve.deletedFiles {
 		dst = binary.AppendUvarint(dst, TagDeletedFile)
 		dst = binary.AppendUvarint(dst, uint64(df.level))
-		dst = binary.AppendUvarint(dst, df.number)
+		dst = binary.AppendUvarint(dst, uint64(df.number))
 	}
 	for _, f := range ve.newFiles {
 		dst = binary.AppendUvarint(dst, TagNewFile)
 		dst = binary.AppendUvarint(dst, uint64(f.level))
-		dst = binary.AppendUvarint(dst, f.number)
+		dst = binary.AppendUvarint(dst, uint64(f.number))
 		dst = binary.AppendUvarint(dst, f.size)
 		dst = util.AppendLengthPrefixedBytes(dst, f.smallest)
 		dst = util.AppendLengthPrefixedBytes(dst, f.largest)
@@ -167,7 +167,7 @@ func (ve *VersionEdit) DecodeFrom(src []byte) error {
 			if n <= 0 {
 				return fmt.Errorf("%w: corrupted log number", db.ErrCorruption)
 			}
-			ve.logNumber = val
+			ve.logNumber = FileNumber(val)
 			ve.hasLogNumber = true
 			src = src[n:]
 		case TagPrevLogNumber:
@@ -175,7 +175,7 @@ func (ve *VersionEdit) DecodeFrom(src []byte) error {
 			if n <= 0 {
 				return fmt.Errorf("%w: corrupted prev log number", db.ErrCorruption)
 			}
-			ve.prevLogNumber = val
+			ve.prevLogNumber = FileNumber(val)
 			ve.hasPrevLogNumber = true
 			src = src[n:]
 		case TagNextFileNumber:
@@ -183,7 +183,7 @@ func (ve *VersionEdit) DecodeFrom(src []byte) error {
 			if n <= 0 {
 				return fmt.Errorf("%w: corrupted next file number", db.ErrCorruption)
 			}
-			ve.nextFileNumber = val
+			ve.nextFileNumber = FileNumber(val)
 			ve.hasNextFileNumber = true
 			src = src[n:]
 		case TagLastSequence:
@@ -191,7 +191,7 @@ func (ve *VersionEdit) DecodeFrom(src []byte) error {
 			if n <= 0 {
 				return fmt.Errorf("%w: corrupted last sequence", db.ErrCorruption)
 			}
-			ve.lastSequence = val
+			ve.lastSequence = SequenceNumber(val)
 			ve.hasLastSequence = true
 			src = src[n:]
 		case TagCompactPointer:
@@ -206,7 +206,7 @@ func (ve *VersionEdit) DecodeFrom(src []byte) error {
 			}
 			src = src[read:]
 			ve.compactPointers = append(ve.compactPointers, CompactPointer{
-				level:       int(level),
+				level:       Level(level),
 				internalKey: internalKey,
 			})
 		case TagDeletedFile:
@@ -223,7 +223,7 @@ func (ve *VersionEdit) DecodeFrom(src []byte) error {
 			if ve.deletedFiles == nil {
 				ve.deletedFiles = make(map[DeletedFile]struct{})
 			}
-			ve.deletedFiles[DeletedFile{number: number, level: int(level)}] = struct{}{}
+			ve.deletedFiles[DeletedFile{number: FileNumber(number), level: Level(level)}] = struct{}{}
 		case TagNewFile:
 			level, n := binary.Uvarint(src)
 			if n <= 0 {
@@ -251,11 +251,11 @@ func (ve *VersionEdit) DecodeFrom(src []byte) error {
 			}
 			src = src[read:]
 			ve.newFiles = append(ve.newFiles, FileMetaData{
-				number:   number,
+				number:   FileNumber(number),
 				size:     size,
 				smallest: append([]byte(nil), smallest...),
 				largest:  append([]byte(nil), largest...),
-				level:    int(level),
+				level:    Level(level),
 			})
 		default:
 			return fmt.Errorf("%w: unknown tag %d", db.ErrCorruption, tag)

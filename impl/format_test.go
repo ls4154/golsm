@@ -61,7 +61,7 @@ func TestInternalKeyComparatorFindShortSuccessorNoChange(t *testing.T) {
 	require.Equal(t, origKey, key)
 }
 
-func makeInternalKeyForComparatorTest(user []byte, seq uint64, t ValueType) []byte {
+func makeInternalKeyForComparatorTest(user []byte, seq SequenceNumber, t ValueType) []byte {
 	out := make([]byte, 0, len(user)+8)
 	out = append(out, user...)
 	return binary.LittleEndian.AppendUint64(out, PackSequenceAndType(seq, t))

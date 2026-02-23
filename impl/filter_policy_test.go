@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func makeInternalKeyForFilterTest(userKey []byte, seq uint64, vt ValueType) []byte {
+func makeInternalKeyForFilterTest(userKey []byte, seq SequenceNumber, vt ValueType) []byte {
 	k := append([]byte(nil), userKey...)
 	k = binary.LittleEndian.AppendUint64(k, PackSequenceAndType(seq, vt))
 	return k

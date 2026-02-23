@@ -256,7 +256,7 @@ func TestMergingIteratorDuplicateKeys(t *testing.T) {
 	// Forward: should see higher seq first (internal key ordering)
 	mit.SeekToFirst()
 	var keys []string
-	var seqs []uint64
+	var seqs []SequenceNumber
 	for mit.Valid() {
 		parsed, err := ParseInternalKey(mit.Key())
 		require.NoError(t, err)
@@ -265,7 +265,7 @@ func TestMergingIteratorDuplicateKeys(t *testing.T) {
 		mit.Next()
 	}
 	require.Equal(t, []string{"a", "a", "b", "b"}, keys)
-	require.Equal(t, []uint64{3, 2, 4, 1}, seqs)
+	require.Equal(t, []SequenceNumber{3, 2, 4, 1}, seqs)
 }
 
 func TestMergingIteratorEmptyChildren(t *testing.T) {
@@ -326,7 +326,7 @@ func TestMergingIteratorErrorPropagation(t *testing.T) {
 	require.Contains(t, mit.Error().Error(), "test error")
 }
 
-func internalKey(user string, seq uint64) []byte {
+func internalKey(user string, seq SequenceNumber) []byte {
 	key := []byte(user)
 	out := make([]byte, 0, len(key)+8)
 	out = append(out, key...)

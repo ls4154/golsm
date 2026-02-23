@@ -17,7 +17,7 @@ const (
 type dbIter struct {
 	iter    db.Iterator
 	userCmp db.Comparator
-	seq     uint64
+	seq     SequenceNumber
 
 	direction iterDirection
 	valid     bool
@@ -29,7 +29,7 @@ type dbIter struct {
 	closed bool
 }
 
-func newDBIter(iter db.Iterator, userCmp db.Comparator, seq uint64) *dbIter {
+func newDBIter(iter db.Iterator, userCmp db.Comparator, seq SequenceNumber) *dbIter {
 	util.Assert(iter != nil)
 	return &dbIter{
 		iter:    iter,

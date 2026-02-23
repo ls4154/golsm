@@ -16,6 +16,10 @@ const (
 
 type ValueType byte
 
+type SequenceNumber uint64
+type FileNumber uint64
+type Level int
+
 const (
 	TypeDeletion ValueType = 0
 	TypeValue    ValueType = 1
@@ -24,10 +28,10 @@ const (
 	TypeForSeek = TypeValue
 )
 
-const MaxSequenceNumber uint64 = (1 << 56) - 1
+const MaxSequenceNumber SequenceNumber = (1 << 56) - 1
 
-func PackSequenceAndType(seq uint64, t ValueType) uint64 {
-	return (seq << 8) | uint64(t)
+func PackSequenceAndType(seq SequenceNumber, t ValueType) uint64 {
+	return (uint64(seq) << 8) | uint64(t)
 }
 
 // InternalKey: [user key] [seq(56b) | type(8b)]
@@ -102,7 +106,7 @@ type LookupKey struct {
 	key []byte
 }
 
-func (k *LookupKey) Set(userKey []byte, seq uint64) {
+func (k *LookupKey) Set(userKey []byte, seq SequenceNumber) {
 	needed := len(userKey) + 8
 	var dst []byte
 	if needed <= len(k.buf) {
@@ -127,7 +131,7 @@ func (k LookupKey) UserKey() []byte {
 
 type ParsedInternalKey struct {
 	UserKey  []byte
-	Sequence uint64
+	Sequence SequenceNumber
 	Type     ValueType
 }
 
@@ -138,7 +142,7 @@ func ParseInternalKey(ikey []byte) (*ParsedInternalKey, error) {
 
 	userKey := ExtractUserKey(ikey)
 	seqType := binary.LittleEndian.Uint64(ikey[len(userKey):])
-	seq := seqType >> 8
+	seq := SequenceNumber(seqType >> 8)
 	t := ValueType(seqType & 0xff)
 
 	return &ParsedInternalKey{

@@ -5,7 +5,7 @@ type SnapshotList struct {
 }
 
 type Snapshot struct {
-	seq uint64
+	seq SequenceNumber
 	db  *dbImpl
 
 	prev *Snapshot
@@ -29,7 +29,7 @@ func NewSnapshotList() *SnapshotList {
 	return l
 }
 
-func (l *SnapshotList) NewSnapshot(seq uint64, db *dbImpl) *Snapshot {
+func (l *SnapshotList) NewSnapshot(seq SequenceNumber, db *dbImpl) *Snapshot {
 	s := &Snapshot{
 		seq: seq,
 		db:  db,

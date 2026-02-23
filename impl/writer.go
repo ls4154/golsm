@@ -192,7 +192,7 @@ func (d *dbImpl) applyBatch(batch *WriteBatchImpl, sync bool) error {
 		err = batch.InsertIntoMemTable(d.mem)
 	}
 
-	d.versions.SetLastSequence(lastSeq + uint64(batch.count()))
+	d.versions.SetLastSequence(lastSeq + SequenceNumber(batch.count()))
 
 	return err
 }

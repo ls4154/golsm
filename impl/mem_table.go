@@ -23,15 +23,15 @@ func NewMemTable(icmp *InternalKeyComparator) *MemTable {
 	}
 }
 
-func (mt *MemTable) Put(seq uint64, key, value []byte) {
+func (mt *MemTable) Put(seq SequenceNumber, key, value []byte) {
 	mt.Add(seq, TypeValue, key, value)
 }
 
-func (mt *MemTable) Delete(seq uint64, key []byte) {
+func (mt *MemTable) Delete(seq SequenceNumber, key []byte) {
 	mt.Add(seq, TypeDeletion, key, nil)
 }
 
-func (mt *MemTable) Add(seq uint64, valueType ValueType, key, value []byte) {
+func (mt *MemTable) Add(seq SequenceNumber, valueType ValueType, key, value []byte) {
 	// key format: key + tag
 	//   tag: (seq << 8) | type
 	internalKey := mt.arena.Allocate(len(key) + 8)
@@ -70,7 +70,7 @@ func (mt *MemTable) Get(lookupKey *LookupKey) (value []byte, deleted, exist bool
 
 func (mt *MemTable) Iterator() *MemTableIterator {
 	return &MemTableIterator{
-		mt:      mt,
+		mt:       mt,
 		listIter: mt.list.Iterator(),
 	}
 }

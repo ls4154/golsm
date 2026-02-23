@@ -20,7 +20,7 @@ type Version struct {
 	files [NumLevels][]*FileMetaData
 
 	compactionScore float64
-	compactionLevel int
+	compactionLevel Level
 
 	refs int
 
@@ -146,7 +146,7 @@ func (v *Version) AddIterators(iters *[]db.Iterator, verifyChecksum, bypassCache
 		*iters = append(*iters, it)
 	}
 
-	for lv := 1; lv < NumLevels; lv++ {
+	for lv := Level(1); lv < NumLevels; lv++ {
 		if len(v.files[lv]) > 0 {
 			*iters = append(*iters, v.vset.newConcatIterator(v.files[lv], verifyChecksum, bypassCache))
 		}
@@ -155,7 +155,7 @@ func (v *Version) AddIterators(iters *[]db.Iterator, verifyChecksum, bypassCache
 	return nil
 }
 
-func (v *Version) getOverlappingFiles(level int, begin, end []byte) []*FileMetaData {
+func (v *Version) getOverlappingFiles(level Level, begin, end []byte) []*FileMetaData {
 	var hasBegin, hasEnd bool
 	var userBegin, userEnd []byte
 	if len(begin) > 0 {
@@ -206,11 +206,11 @@ type VersionSet struct {
 	icmp           *InternalKeyComparator
 	paranoidChecks bool
 
-	nextFileNumber     uint64
-	manifestFileNumber uint64
-	lastSequence       uint64
-	logNumber          uint64
-	prevLogNumber      uint64
+	nextFileNumber     FileNumber
+	manifestFileNumber FileNumber
+	lastSequence       atomic.Uint64
+	logNumber          FileNumber
+	prevLogNumber      FileNumber
 
 	descriptorFile db.WritableFile
 	descriptorLog  *log.Writer
@@ -226,7 +226,7 @@ type VersionSet struct {
 }
 
 type Compaction struct {
-	level int
+	level Level
 
 	inputVersion *Version
 	inputs       [2][]*FileMetaData
@@ -250,7 +250,7 @@ func (c *Compaction) NewInputIterator() (db.Iterator, error) {
 	}
 	iters := make([]db.Iterator, 0, numIters)
 
-	for i := range 2 {
+	for i := Level(0); i < 2; i++ {
 		level := c.level + i
 		if level == 0 {
 			for _, f := range c.inputs[i] {
@@ -272,7 +272,7 @@ type VersionBuilder struct {
 	vset *VersionSet
 	base *Version
 
-	deletedFiles [NumLevels]map[uint64]struct{}
+	deletedFiles [NumLevels]map[FileNumber]struct{}
 	addedFiles   [NumLevels][]*FileMetaData
 }
 
@@ -294,7 +294,7 @@ func (b *VersionBuilder) Apply(edit *VersionEdit) {
 }
 
 func (b *VersionBuilder) SaveTo(v *Version) {
-	for level := range NumLevels {
+	for level := Level(0); level < NumLevels; level++ {
 		baseFiles := b.base.files[level]
 		v.files[level] = make([]*FileMetaData, 0, len(baseFiles)+len(b.addedFiles[level]))
 
@@ -337,7 +337,7 @@ func (b *VersionBuilder) SaveTo(v *Version) {
 	}
 }
 
-func (b *VersionBuilder) MaybeAddFile(v *Version, level int, f *FileMetaData) {
+func (b *VersionBuilder) MaybeAddFile(v *Version, level Level, f *FileMetaData) {
 	if _, ok := b.deletedFiles[level][f.number]; ok {
 		// Deleted file
 		return
@@ -364,7 +364,6 @@ func NewVersionSet(dbname string, icmp *InternalKeyComparator, env db.Env, table
 		paranoidChecks:     paranoidChecks,
 		nextFileNumber:     2,
 		manifestFileNumber: 0,
-		lastSequence:       0,
 		logNumber:          0,
 
 		descriptorFile: nil,
@@ -467,13 +466,13 @@ func (vs *VersionSet) writeSnapshot(log *log.Writer) error {
 
 	for lv, cp := range vs.compactPointer {
 		if len(cp) > 0 {
-			edit.SetCompactPointer(lv, cp)
+			edit.SetCompactPointer(Level(lv), cp)
 		}
 	}
 
 	for lv, files := range vs.current.files {
 		for _, f := range files {
-			edit.AddFile(lv, f.number, f.size, f.smallest, f.largest)
+			edit.AddFile(Level(lv), f.number, f.size, f.smallest, f.largest)
 		}
 	}
 
@@ -505,7 +504,8 @@ func (vs *VersionSet) Recover() error {
 	builder := vs.NewBuilder(vs.current)
 	var recoverErr error
 	var haveLogNumber, havePrevLogNumber, haveNextFileNumber, haveLastSequence bool
-	var logNumber, prevLogNumber, nextFileNumber, lastSequence uint64
+	var logNumber, prevLogNumber, nextFileNumber FileNumber
+	var lastSequence SequenceNumber
 
 	{
 		reader := log.NewReader(file)
@@ -582,7 +582,7 @@ func (vs *VersionSet) Recover() error {
 	vs.AppendVersion(v)
 	vs.manifestFileNumber = nextFileNumber
 	vs.nextFileNumber = nextFileNumber + 1
-	vs.lastSequence = lastSequence
+	vs.lastSequence.Store(uint64(lastSequence))
 	vs.logNumber = logNumber
 	vs.prevLogNumber = prevLogNumber
 
@@ -591,21 +591,21 @@ func (vs *VersionSet) Recover() error {
 	return nil
 }
 
-func (vs *VersionSet) GetLastSequence() uint64 {
-	return atomic.LoadUint64(&vs.lastSequence)
+func (vs *VersionSet) GetLastSequence() SequenceNumber {
+	return SequenceNumber(vs.lastSequence.Load())
 }
 
-func (vs *VersionSet) SetLastSequence(seq uint64) {
-	atomic.StoreUint64(&vs.lastSequence, seq)
+func (vs *VersionSet) SetLastSequence(seq SequenceNumber) {
+	vs.lastSequence.Store(uint64(seq))
 }
 
-func (vs *VersionSet) NewFileNumber() uint64 {
+func (vs *VersionSet) NewFileNumber() FileNumber {
 	n := vs.nextFileNumber
 	vs.nextFileNumber++
 	return n
 }
 
-func (vs *VersionSet) MakeFileNumberUsed(number uint64) {
+func (vs *VersionSet) MakeFileNumberUsed(number FileNumber) {
 	if number >= vs.nextFileNumber {
 		vs.nextFileNumber = number + 1
 	}
@@ -616,7 +616,7 @@ func (vs *VersionSet) NewVersion() *Version {
 		vset:            vs,
 		files:           [7][]*FileMetaData{},
 		compactionScore: -1,
-		compactionLevel: -1,
+		compactionLevel: Level(-1),
 	}
 	v.next = v
 	v.prev = v
@@ -639,11 +639,11 @@ func (vs *VersionSet) AppendVersion(v *Version) {
 }
 
 func (vs *VersionSet) Finalize(v *Version) {
-	bestLevel := -1
+	bestLevel := Level(-1)
 	bestScore := float64(-1)
 
 	// last level cannot be picked as a compaction source
-	for level := range NumLevels - 1 {
+	for level := Level(0); level < NumLevels-1; level++ {
 		score := float64(0)
 		if level == 0 {
 			score = float64(len(v.files[level])) / L0CompactionTrigger
@@ -716,7 +716,7 @@ func (vs *VersionSet) setupBaseInputs(c *Compaction) {
 	if level == 0 {
 		// L0 files may overlap each other, include the full overlapping  first.
 		smallest, largest := getRange(vs.icmp, c.inputs[0])
-		c.inputs[0] = cur.getOverlappingFiles(0, smallest, largest)
+		c.inputs[0] = cur.getOverlappingFiles(Level(0), smallest, largest)
 	}
 }
 
@@ -756,18 +756,18 @@ func (vs *VersionSet) NewBuilder(v *Version) *VersionBuilder {
 		base: v,
 	}
 
-	for i := range NumLevels {
-		builder.deletedFiles[i] = make(map[uint64]struct{})
+	for i := Level(0); i < NumLevels; i++ {
+		builder.deletedFiles[i] = make(map[FileNumber]struct{})
 	}
 
 	return builder
 }
 
-func (vs *VersionSet) LiveFiles() map[uint64]struct{} {
-	m := map[uint64]struct{}{}
+func (vs *VersionSet) LiveFiles() map[FileNumber]struct{} {
+	m := map[FileNumber]struct{}{}
 
 	for v := vs.dummyVersions.next; v != &vs.dummyVersions; v = v.next {
-		for lv := range NumLevels {
+		for lv := Level(0); lv < NumLevels; lv++ {
 			for _, f := range v.files[lv] {
 				m[f.number] = struct{}{}
 			}
@@ -777,7 +777,7 @@ func (vs *VersionSet) LiveFiles() map[uint64]struct{} {
 	return m
 }
 
-func (vs *VersionSet) NumLevelFiles(level int) int {
+func (vs *VersionSet) NumLevelFiles(level Level) int {
 	return len(vs.current.files[level])
 }
 
@@ -789,7 +789,7 @@ func totalFileSize(files []*FileMetaData) uint64 {
 	return size
 }
 
-func maxBytesForlevel(level int) float64 {
+func maxBytesForlevel(level Level) float64 {
 	result := 10 * 1048576.0 // 10MB
 	for level > 1 {
 		result *= 10
@@ -881,7 +881,7 @@ func lowerBoundFiles(icmp db.Comparator, files []*FileMetaData, key []byte) int 
 
 func (vs *VersionSet) newConcatIterator(files []*FileMetaData, verifyChecksum, bypassCache bool) db.Iterator {
 	return table.NewTwoLevelIterator(newLevelFileNumIterator(vs.icmp, files), func(fileValue []byte) (db.Iterator, error) {
-		fnum := binary.LittleEndian.Uint64(fileValue[0:])
+		fnum := FileNumber(binary.LittleEndian.Uint64(fileValue[0:]))
 		fsize := binary.LittleEndian.Uint64(fileValue[8:])
 		return vs.tableCache.NewIterator(fnum, fsize, verifyChecksum, bypassCache)
 	})

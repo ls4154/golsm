@@ -97,7 +97,7 @@ func TestRemoveObsoleteFiles(t *testing.T) {
 		dbname:         "db",
 		env:            env,
 		versions:       vset,
-		pendingOutputs: map[uint64]struct{}{2: {}, 5: {}},
+		pendingOutputs: map[FileNumber]struct{}{2: {}, 5: {}},
 		logger:         nopLogger{},
 	}
 
@@ -132,7 +132,7 @@ func TestRemoveObsoleteFilesMultipleLogs(t *testing.T) {
 		dbname:         "db",
 		env:            env,
 		versions:       vset,
-		pendingOutputs: map[uint64]struct{}{},
+		pendingOutputs: map[FileNumber]struct{}{},
 		logger:         nopLogger{},
 	}
 
@@ -166,7 +166,7 @@ func TestRemoveObsoleteFilesMultipleLogsAndManifests(t *testing.T) {
 		dbname:         "db",
 		env:            env,
 		versions:       vset,
-		pendingOutputs: map[uint64]struct{}{},
+		pendingOutputs: map[FileNumber]struct{}{},
 		logger:         nopLogger{},
 	}
 

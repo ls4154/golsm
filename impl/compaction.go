@@ -31,7 +31,7 @@ func (d *dbImpl) doCompactionWork(c *Compaction) error {
 
 	d.logger.Printf("Compacting %d@%d + %d@%d files", len(c.inputs[0]), c.level, len(c.inputs[1]), c.level+1)
 
-	var smallestSnapshot uint64
+	var smallestSnapshot SequenceNumber
 	if d.snapshots.Empty() {
 		smallestSnapshot = d.versions.GetLastSequence()
 	} else {
@@ -47,7 +47,7 @@ func (d *dbImpl) doCompactionWork(c *Compaction) error {
 	d.mu.Unlock()
 	var hasCurUserKey bool
 	var curUserKey []byte
-	var lastSequenceForKey uint64
+	var lastSequenceForKey SequenceNumber
 
 	var builder *table.TableBuilder
 	var outputs []*FileMetaData
@@ -167,7 +167,7 @@ func (d *dbImpl) doCompactionWork(c *Compaction) error {
 	return err
 }
 
-func (d *dbImpl) NewCompactionOutputBuilder() (*table.TableBuilder, uint64, db.WritableFile, error) {
+func (d *dbImpl) NewCompactionOutputBuilder() (*table.TableBuilder, FileNumber, db.WritableFile, error) {
 	d.mu.Lock()
 
 	fileNum := d.versions.NewFileNumber()
@@ -254,7 +254,7 @@ func (d *dbImpl) CleaunupCompaction(builder *table.TableBuilder, file db.Writabl
 // keyNotExistsInHigherLevel checks whether userKey is absent from all levels
 // >= checkFrom. levelPtrs is advanced monotonically as compaction iterates
 // in key order, keeping each per-level scan at O(n) overall.
-func keyNotExistsInHigherLevel(userKey []byte, userCmp db.Comparator, v *Version, checkFrom int, levelPtrs *[NumLevels]int) bool {
+func keyNotExistsInHigherLevel(userKey []byte, userCmp db.Comparator, v *Version, checkFrom Level, levelPtrs *[NumLevels]int) bool {
 	for lv := checkFrom; lv < NumLevels; lv++ {
 		files := v.files[lv]
 		for levelPtrs[lv] < len(files) {

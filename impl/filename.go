@@ -23,23 +23,23 @@ func CurrentFileName(dbname string) string {
 	return filepath.Join(dbname, "CURRENT")
 }
 
-func LogFileName(dbname string, num uint64) string {
+func LogFileName(dbname string, num FileNumber) string {
 	return filepath.Join(dbname, fmt.Sprintf("%06d.log", num))
 }
 
-func TableFileName(dbname string, num uint64) string {
+func TableFileName(dbname string, num FileNumber) string {
 	return filepath.Join(dbname, fmt.Sprintf("%06d.ldb", num))
 }
 
-func SSTTableFileName(dbname string, num uint64) string {
+func SSTTableFileName(dbname string, num FileNumber) string {
 	return filepath.Join(dbname, fmt.Sprintf("%06d.sst", num))
 }
 
-func TempFileName(dbname string, num uint64) string {
+func TempFileName(dbname string, num FileNumber) string {
 	return filepath.Join(dbname, fmt.Sprintf("%06d.dbtmp", num))
 }
 
-func DescriptorFileName(dbname string, num uint64) string {
+func DescriptorFileName(dbname string, num FileNumber) string {
 	return filepath.Join(dbname, fmt.Sprintf("MANIFEST-%06d", num))
 }
 
@@ -51,7 +51,7 @@ func InfoLogFileName(dbname string) string {
 	return filepath.Join(dbname, "LOG")
 }
 
-func ParseFileName(filename string) (FileType, uint64, bool) {
+func ParseFileName(filename string) (FileType, FileNumber, bool) {
 	if filename == "CURRENT" {
 		return FileTypeCurrent, 0, true
 	}
@@ -70,7 +70,7 @@ func ParseFileName(filename string) (FileType, uint64, bool) {
 		if err != nil {
 			return 0, 0, false
 		}
-		return FileTypeDescriptor, num, true
+		return FileTypeDescriptor, FileNumber(num), true
 	}
 
 	var fileType FileType
@@ -94,5 +94,5 @@ func ParseFileName(filename string) (FileType, uint64, bool) {
 	if err != nil {
 		return 0, 0, false
 	}
-	return fileType, num, true
+	return fileType, FileNumber(num), true
 }
