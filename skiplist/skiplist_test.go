@@ -2,12 +2,32 @@ package skiplist
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math/rand"
 	"sort"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+var Uint64Comparator uint64Comparator
+
+type uint64Comparator struct{}
+
+func (uint64Comparator) Compare(a []byte, b []byte) int {
+	numA := binary.NativeEndian.Uint64(a)
+	numB := binary.NativeEndian.Uint64(b)
+
+	if numA < numB {
+		return -1
+	} else if numA == numB {
+		return 0
+	} else {
+		return 1
+	}
+}
 
 func TestSkipListEmpty(t *testing.T) {
 	arena := NewArena(4096)
@@ -93,6 +113,73 @@ func TestSkipListRand(t *testing.T) {
 		require.True(t, it.Valid())
 		require.Equal(t, keys[i], bytesToUint64(it.Key()))
 		it.Prev()
+	}
+}
+
+func TestSkipListConcurrentReadersSingleWriter(t *testing.T) {
+	const (
+		totalKeys     = 20000
+		readerWorkers = 8
+	)
+
+	arena := NewArena(4096)
+	list := NewSkipList(Uint64Comparator, arena)
+
+	var published int64 = -1
+	done := make(chan struct{})
+	errCh := make(chan error, readerWorkers)
+
+	var writerWG sync.WaitGroup
+	writerWG.Add(1)
+	go func() {
+		defer writerWG.Done()
+		for i := 0; i < totalKeys; i++ {
+			list.Insert(uint64ToBytes(arena, uint64(i)), nil)
+			atomic.StoreInt64(&published, int64(i))
+		}
+		close(done)
+	}()
+
+	var readerWG sync.WaitGroup
+	for i := 0; i < readerWorkers; i++ {
+		readerWG.Add(1)
+		go func(seed int64) {
+			defer readerWG.Done()
+			rnd := rand.New(rand.NewSource(seed))
+			for {
+				max := atomic.LoadInt64(&published)
+				if max >= 0 {
+					k := uint64(rnd.Int63n(max + 1))
+					key := uint64ToBytes(nil, k)
+					if !list.Contains(key) {
+						errCh <- fmt.Errorf("missing key in Contains: %d (published=%d)", k, max)
+						return
+					}
+					if _, ok := list.Get(key); !ok {
+						errCh <- fmt.Errorf("missing key in Get: %d (published=%d)", k, max)
+						return
+					}
+				}
+
+				select {
+				case <-done:
+					return
+				default:
+				}
+			}
+		}(int64(1000 + i))
+	}
+
+	writerWG.Wait()
+	readerWG.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+
+	for i := 0; i < totalKeys; i++ {
+		require.True(t, list.Contains(uint64ToBytes(nil, uint64(i))))
 	}
 }
 

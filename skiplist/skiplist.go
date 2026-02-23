@@ -8,6 +8,10 @@ import (
 	"github.com/ls4154/golsm/util"
 )
 
+type Comparator interface {
+	Compare(a []byte, b []byte) int
+}
+
 // Concurrency: lock-free multi-reader + externally serialized single-writer.
 // Readers can run concurrently with the writer and may miss in-flight inserts.
 type SkipList struct {

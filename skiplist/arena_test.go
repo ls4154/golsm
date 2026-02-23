@@ -16,7 +16,7 @@ func TestArena4k(t *testing.T) {
 		m = arena.AllocateAligned(size)
 		require.Len(t, m, size)
 		ptr := bytesToPtr(m)
-		require.Zero(t, uintptr(ptr)%align != 0)
+		require.Zero(t, uintptr(ptr)%uintptr(align) != 0)
 	}
 }
 
@@ -30,6 +30,6 @@ func TestArena1m(t *testing.T) {
 		m = arena.AllocateAligned(size)
 		require.Len(t, m, size)
 		ptr := bytesToPtr(m)
-		require.Zero(t, uintptr(ptr)%align != 0)
+		require.Zero(t, uintptr(ptr)%uintptr(align) != 0)
 	}
 }

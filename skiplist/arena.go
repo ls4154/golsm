@@ -33,7 +33,10 @@ func (a *Arena) Allocate(bytes int) []byte {
 	return m
 }
 
-const align = 8
+const (
+	wordSize = int(unsafe.Sizeof(uintptr(0)))
+	align    = int(unsafe.Alignof(uintptr(0)))
+)
 
 func (a *Arena) AllocateAligned(bytes int) []byte {
 	padSize := 0
@@ -68,13 +71,20 @@ func (a *Arena) allocateFallBack(bytes int) []byte {
 }
 
 func (a *Arena) allocateNewBlock(bytes int) []byte {
-	block := make([]byte, bytes)
+	words := divRoundUp(bytes, wordSize)
+	// Allocate as []uintptr to guarantee pointer alignment, then cast to []byte.
+	mem := make([]uintptr, words)
+	block := unsafe.Slice((*byte)(unsafe.Pointer(&mem[0])), bytes)
 
-	util.Assert(uintptr(unsafe.Pointer(&block[0]))%align == 0)
+	util.Assert(uintptr(unsafe.Pointer(&block[0]))%uintptr(align) == 0)
 
 	a.blocks = append(a.blocks, block)
-	a.memUsage += bytes
+	a.memUsage += words * wordSize
 	return block
+}
+
+func divRoundUp(n, d int) int {
+	return (n + d - 1) / d
 }
 
 func (a *Arena) MemoryUsage() int {
