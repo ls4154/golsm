@@ -75,7 +75,7 @@ func Open(userOpt *db.Options, dbname string) (db.DB, error) {
 		bcache = table.NewBlockCache(opt.BlockCacheSize)
 	}
 	tcache := NewTableCache(dbname, env, opt.MaxOpenFiles, icmp, ifilter, bcache, opt.ParanoidChecks)
-	vset := NewVersionSet(dbname, icmp, env, tcache, opt.ParanoidChecks, newCompactionPolicy(opt.Compaction))
+	vset := NewVersionSet(dbname, icmp, env, tcache, opt.ParanoidChecks, opt.MaxManifestFileSize, newCompactionPolicy(opt.Compaction))
 	snapshots := NewSnapshotList()
 
 	db := &dbImpl{
@@ -631,9 +631,9 @@ func (d *dbImpl) FindObsoleteFiles() []string {
 		return nil
 	}
 
-	live := d.versions.LiveFiles()
+	liveTables := d.versions.LiveFiles()
 	for num := range d.pendingOutputs {
-		live[num] = struct{}{}
+		liveTables[num] = struct{}{}
 	}
 
 	fileNames, err := d.env.GetChildren(d.dbname)
@@ -656,11 +656,20 @@ func (d *dbImpl) FindObsoleteFiles() []string {
 			// Keep current log and previous log needed for recovery.
 			keep = (fnum >= d.versions.logNumber) || (fnum == d.versions.prevLogNumber)
 		case FileTypeDescriptor:
-			keep = fnum >= d.versions.manifestFileNumber
+			// TODO remove redundant check? pending is always larger then current manifest
+			keep = fnum >= d.versions.manifestFileNumber || fnum == d.versions.pendingManifestFileNumber
 		case FileTypeCurrent, FileTypeLock, FileTypeInfoLog:
 			keep = true
-		case FileTypeTable, FileTypeTemp:
-			_, keep = live[fnum]
+		case FileTypeTable:
+			_, keep = liveTables[fnum]
+		case FileTypeTemp:
+			if _, ok := d.pendingOutputs[fnum]; ok {
+				keep = true
+			} else if fnum == d.versions.pendingManifestFileNumber {
+				keep = true
+			} else {
+				keep = false
+			}
 		default:
 			keep = true
 		}

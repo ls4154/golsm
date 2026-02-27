@@ -204,17 +204,19 @@ restart:
 }
 
 type VersionSet struct {
-	dbname         string
-	tableCache     *TableCache
-	icmp           *InternalKeyComparator
-	paranoidChecks bool
-	compaction     *compactionPolicy
+	dbname              string
+	tableCache          *TableCache
+	icmp                *InternalKeyComparator
+	paranoidChecks      bool
+	compaction          *compactionPolicy
+	maxManifestFileSize uint64
 
-	nextFileNumber     FileNumber
-	manifestFileNumber FileNumber
-	lastSequence       atomic.Uint64
-	logNumber          FileNumber
-	prevLogNumber      FileNumber
+	nextFileNumber            FileNumber
+	manifestFileNumber        FileNumber
+	pendingManifestFileNumber FileNumber
+	lastSequence              atomic.Uint64
+	logNumber                 FileNumber
+	prevLogNumber             FileNumber
 
 	descriptorFile fs.WritableFile
 	descriptorLog  *log.Writer
@@ -360,18 +362,19 @@ func (b *VersionBuilder) MaybeAddFile(v *Version, level Level, f *FileMetaData) 
 }
 
 func NewVersionSet(dbname string, icmp *InternalKeyComparator, env fs.Env, tableCache *TableCache,
-	paranoidChecks bool, compaction *compactionPolicy) *VersionSet {
+	paranoidChecks bool, maxManifestFileSize uint64, compaction *compactionPolicy) *VersionSet {
 	util.Assert(compaction != nil)
 
 	vset := &VersionSet{
-		dbname:             dbname,
-		tableCache:         tableCache,
-		icmp:               icmp,
-		paranoidChecks:     paranoidChecks,
-		compaction:         compaction,
-		nextFileNumber:     2,
-		manifestFileNumber: 0,
-		logNumber:          0,
+		dbname:              dbname,
+		tableCache:          tableCache,
+		icmp:                icmp,
+		paranoidChecks:      paranoidChecks,
+		compaction:          compaction,
+		nextFileNumber:      2,
+		manifestFileNumber:  0,
+		logNumber:           0,
+		maxManifestFileSize: maxManifestFileSize,
 
 		descriptorFile: nil,
 		descriptorLog:  nil,
@@ -415,9 +418,6 @@ func (vs *VersionSet) LogAndApply(edit *VersionEdit, dbMu *sync.Mutex) error {
 		edit.SetPrevLogNumber(vs.prevLogNumber)
 	}
 
-	edit.SetNextFileNumber(vs.nextFileNumber)
-	edit.SetLastSequence(vs.GetLastSequence())
-
 	v := vs.NewVersion()
 	builder := vs.NewBuilder(vs.current)
 	builder.Apply(edit)
@@ -425,39 +425,86 @@ func (vs *VersionSet) LogAndApply(edit *VersionEdit, dbMu *sync.Mutex) error {
 	vs.Finalize(v)
 
 	setCurrent := false
-	if vs.descriptorLog == nil {
-		// TODO If manifest rotation is added later, protect the temporary CURRENT file, to avoid obsolete GC races
-		setCurrent = true
-		newManifestFile := DescriptorFileName(vs.dbname, vs.manifestFileNumber)
-		f, err := vs.env.NewWritableFile(newManifestFile)
-		if err != nil {
-			return wrapIOError(err, "create manifest %s", newManifestFile)
-		}
-		vs.descriptorFile = f
-		vs.descriptorLog = log.NewWriter(f)
+	createNewManifest := false
+	newManifestNumber := vs.manifestFileNumber
+	var newDescriptorFile fs.WritableFile
+	var newDescriptorLog *log.Writer
+	oldDescriptorFile := vs.descriptorFile
 
-		err = vs.writeSnapshot(vs.descriptorLog)
-		if err != nil {
-			return err
+	if vs.descriptorLog == nil {
+		createNewManifest = true
+		setCurrent = true
+	} else if vs.maxManifestFileSize > 0 {
+		if vs.descriptorLog.Size() >= vs.maxManifestFileSize {
+			createNewManifest = true
+			setCurrent = true
+			newManifestNumber = vs.NewFileNumber()
 		}
 	}
+
+	if createNewManifest {
+		vs.pendingManifestFileNumber = newManifestNumber
+		newManifestFile := DescriptorFileName(vs.dbname, newManifestNumber)
+		f, err := vs.env.NewWritableFile(newManifestFile)
+		if err != nil {
+			vs.pendingManifestFileNumber = 0
+			return wrapIOError(err, "create manifest %s", newManifestFile)
+		}
+		newDescriptorFile = f
+		newDescriptorLog = log.NewWriter(f)
+	}
+
+	edit.SetNextFileNumber(vs.nextFileNumber)
+	edit.SetLastSequence(vs.GetLastSequence())
 
 	dbMu.Unlock()
 
 	record := edit.Append(nil)
-	err := vs.descriptorLog.AddRecord(record)
+	var err error
+	if createNewManifest {
+		// FIXME: writeSnapshot currently reads vs.compactPointer / vs.current directly
+		// after dbMu is unlocked. PickCompaction mutates compactPointer under dbMu
+		// without applyMu, so this read path should use a copy captured under dbMu
+		// to avoid unsynchronized read/write on shared state.
+		err = vs.writeSnapshot(newDescriptorLog)
+	}
 	if err == nil {
-		err = vs.descriptorFile.Sync()
+		if createNewManifest {
+			err = newDescriptorLog.AddRecord(record)
+		} else {
+			err = vs.descriptorLog.AddRecord(record)
+		}
+	}
+	if err == nil {
+		if createNewManifest {
+			err = newDescriptorFile.Sync()
+		} else {
+			err = vs.descriptorFile.Sync()
+		}
 	}
 	if err == nil && setCurrent {
-		err = SetCurrentFile(vs.env, vs.dbname, vs.manifestFileNumber)
+		err = SetCurrentFile(vs.env, vs.dbname, newManifestNumber)
 	}
 
 	dbMu.Lock()
 
 	if err != nil {
-		// TODO remove new manifest file if error occurs
+		if createNewManifest {
+			vs.pendingManifestFileNumber = 0
+			_ = newDescriptorFile.Close()
+			_ = vs.env.RemoveFile(DescriptorFileName(vs.dbname, newManifestNumber))
+		}
 		return wrapIOError(err, "apply version edit")
+	}
+
+	if createNewManifest {
+		vs.pendingManifestFileNumber = 0
+		vs.manifestFileNumber = newManifestNumber
+		vs.descriptorFile = newDescriptorFile
+		vs.descriptorLog = newDescriptorLog
+		if oldDescriptorFile != nil {
+			_ = oldDescriptorFile.Close()
+		}
 	}
 
 	vs.AppendVersion(v)

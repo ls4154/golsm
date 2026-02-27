@@ -85,7 +85,7 @@ func TestRemoveObsoleteFiles(t *testing.T) {
 		},
 	}
 
-	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false, newCompactionPolicy(db.DefaultCompactionOptions(0)))
+	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false, 64<<20, newCompactionPolicy(db.DefaultCompactionOptions(0)))
 	vset.logNumber = 4
 	vset.prevLogNumber = 0
 	v := vset.NewVersion()
@@ -120,7 +120,7 @@ func TestRemoveObsoleteFilesMultipleLogs(t *testing.T) {
 		},
 	}
 
-	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false, newCompactionPolicy(db.DefaultCompactionOptions(0)))
+	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false, 64<<20, newCompactionPolicy(db.DefaultCompactionOptions(0)))
 	vset.logNumber = 5
 	vset.prevLogNumber = 4
 	v := vset.NewVersion()
@@ -156,7 +156,7 @@ func TestRemoveObsoleteFilesMultipleLogsAndManifests(t *testing.T) {
 		},
 	}
 
-	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false, newCompactionPolicy(db.DefaultCompactionOptions(0)))
+	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false, 64<<20, newCompactionPolicy(db.DefaultCompactionOptions(0)))
 	vset.logNumber = 5
 	vset.prevLogNumber = 4
 	vset.manifestFileNumber = 6
@@ -176,6 +176,67 @@ func TestRemoveObsoleteFilesMultipleLogsAndManifests(t *testing.T) {
 	d.mu.Unlock()
 
 	require.ElementsMatch(t, []string{"db/000003.log", "db/MANIFEST-000001"}, env.removed)
+}
+
+func TestRemoveObsoleteFilesKeepsPendingManifestTemp(t *testing.T) {
+	env := &recordingEnv{
+		children: []string{
+			"000006.dbtmp",
+			"000007.dbtmp",
+			"CURRENT",
+		},
+	}
+
+	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false, 64<<20, newCompactionPolicy(db.DefaultCompactionOptions(0)))
+	vset.manifestFileNumber = 5
+	vset.pendingManifestFileNumber = 6
+	v := vset.NewVersion()
+	vset.AppendVersion(v)
+
+	d := &dbImpl{
+		dbname:         "db",
+		env:            env,
+		versions:       vset,
+		pendingOutputs: map[FileNumber]struct{}{},
+		logger:         nopLogger{},
+	}
+
+	d.mu.Lock()
+	d.CleanupObsoleteFiles()
+	d.mu.Unlock()
+
+	require.Equal(t, []string{"db/000007.dbtmp"}, env.removed)
+}
+
+func TestRemoveObsoleteFilesTempNotKeptByLiveTable(t *testing.T) {
+	env := &recordingEnv{
+		children: []string{
+			"000001.ldb",
+			"000001.dbtmp",
+			"CURRENT",
+		},
+	}
+
+	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false, 64<<20, newCompactionPolicy(db.DefaultCompactionOptions(0)))
+	v := vset.NewVersion()
+	v.files[0] = []*FileMetaData{
+		{number: 1, size: 100},
+	}
+	vset.AppendVersion(v)
+
+	d := &dbImpl{
+		dbname:         "db",
+		env:            env,
+		versions:       vset,
+		pendingOutputs: map[FileNumber]struct{}{},
+		logger:         nopLogger{},
+	}
+
+	d.mu.Lock()
+	d.CleanupObsoleteFiles()
+	d.mu.Unlock()
+
+	require.Equal(t, []string{"db/000001.dbtmp"}, env.removed)
 }
 
 func TestDeleteObsoleteFilesEvictsTableCache(t *testing.T) {
@@ -212,7 +273,7 @@ func TestDeleteObsoleteFilesEvictsTableCache(t *testing.T) {
 func TestNewCompactionOutputBuilderOpenFailureCleansPendingOutput(t *testing.T) {
 	env := &recordingEnv{}
 
-	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false, newCompactionPolicy(db.DefaultCompactionOptions(0)))
+	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false, 64<<20, newCompactionPolicy(db.DefaultCompactionOptions(0)))
 	v := vset.NewVersion()
 	vset.AppendVersion(v)
 

@@ -37,7 +37,7 @@ func testVersionSetForCompactionWithPolicy(opt *db.CompactionOptions) *VersionSe
 	if err != nil {
 		panic(err)
 	}
-	return NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, nil, nil, false, newCompactionPolicy(validated))
+	return NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, nil, nil, false, 64<<20, newCompactionPolicy(validated))
 }
 
 func TestVersionSetNeedsCompactionL0Trigger(t *testing.T) {

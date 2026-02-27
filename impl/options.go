@@ -21,6 +21,7 @@ func validateOption(userOpt *db.Options) (*db.Options, error) {
 	opt.BlockSize = clipToRange(userOpt.BlockSize, 1<<10, 4<<20)
 	opt.BlockRestartInterval = clipToRange(userOpt.BlockRestartInterval, 1, 128)
 	opt.MaxFileSize = clipToRange(userOpt.MaxFileSize, 1<<20, 1<<30)
+	opt.MaxManifestFileSize = clipToRange(userOpt.MaxManifestFileSize, uint64(1<<10), uint64(1<<30))
 	opt.WriteBufferSize = clipToRange(userOpt.WriteBufferSize, 64<<10, 1<<30)
 	opt.MaxOpenFiles = clipToRange(userOpt.MaxOpenFiles, 100, 50000)
 	opt.BlockCacheSize = userOpt.BlockCacheSize

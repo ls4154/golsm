@@ -121,6 +121,9 @@ type Options struct {
 	BlockRestartInterval int
 	// MaxFileSize is the target maximum SSTable file size in bytes.
 	MaxFileSize uint64
+	// MaxManifestFileSize is the target maximum MANIFEST file size in bytes.
+	// When exceeded, a new MANIFEST is created and CURRENT is switched.
+	MaxManifestFileSize uint64
 	// WriteBufferSize is the memtable size limit in bytes.
 	// Exceeding this limit triggers flush/compaction flow.
 	WriteBufferSize int
@@ -157,6 +160,7 @@ func DefaultOptions() *Options {
 		BlockSize:            defaultBlockSize,
 		BlockRestartInterval: defaultBlockRestartInterval,
 		MaxFileSize:          defaultMaxFileSize,
+		MaxManifestFileSize:  64 << 20,
 		WriteBufferSize:      defaultWriteBufferSize,
 		MaxOpenFiles:         defaultMaxOpenFiles,
 		BlockCacheSize:       defaultBlockCacheSize,
