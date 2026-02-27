@@ -504,8 +504,10 @@ func (d *dbImpl) newInternalIterator(options *db.ReadOptions) (db.Iterator, Sequ
 }
 
 func (d *dbImpl) GetSnapshot() db.Snapshot {
+	d.mu.Lock()
 	seq := d.versions.GetLastSequence()
 	s := d.snapshots.NewSnapshot(seq, d)
+	d.mu.Unlock()
 	return s
 }
 

@@ -413,6 +413,30 @@ func TestSnapshotWithBatch(t *testing.T) {
 	ldb.Close()
 }
 
+func TestSnapshotConcurrentGetRelease(t *testing.T) {
+	testDir := t.TempDir()
+	ldb, err := Open(db.DefaultOptions(), testDir)
+	require.NoError(t, err)
+	defer ldb.Close()
+
+	require.NoError(t, ldb.Put([]byte("k"), []byte("v"), nil))
+
+	const goroutines = 8
+	const iterations = 200
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for range goroutines {
+		go func() {
+			defer wg.Done()
+			for range iterations {
+				snap := ldb.GetSnapshot()
+				snap.Release()
+			}
+		}()
+	}
+	wg.Wait()
+}
+
 func TestDBFlushAndRecover(t *testing.T) {
 	testDir := t.TempDir()
 	opt := db.DefaultOptions()
