@@ -29,11 +29,22 @@ func NewReader(src io.Reader) *Reader {
 	return r
 }
 
-// ReadRecord reassembles one logical WAL record from one or more
-// physical fragments (FULL/FIRST/MIDDLE/LAST).
-// TODO scratch
+// ReadRecord returns one logical WAL record.
+//
+// The returned bytes are owned by the caller and are safe to modify and retain.
 func (r *Reader) ReadRecord() ([]byte, error) {
-	var record []byte
+	return r.ReadRecordInto(nil)
+}
+
+// ReadRecordInto decodes one logical WAL record into dst and returns it.
+//
+// dst's previous contents are discarded, returned slice may alias dst.
+func (r *Reader) ReadRecordInto(dst []byte) ([]byte, error) {
+	record := dst[:0]
+	if record == nil {
+		record = make([]byte, 0)
+	}
+	// Assemble one logical record from FULL or FIRST/MIDDLE/LAST fragments.
 	inFragmentedRecord := false
 	for {
 		fragment, recordType, err := r.readPhysicalRecord()
@@ -41,22 +52,22 @@ func (r *Reader) ReadRecord() ([]byte, error) {
 			return nil, err
 		}
 
-		// TODO resyncing?
+		// TODO: If initial-offset reads are needed, implement resync here.
+		// Skip a run of MIDDLE/LAST fragments until a new logical-record boundary is found.
 
 		switch recordType {
 		case logRecordFull:
 			if inFragmentedRecord {
 				return nil, fmt.Errorf("%w: partial record without end", db.ErrCorruption)
 			}
-			record = fragment
+			record = append(record[:0], fragment...)
 			return record, nil
 		case logRecordFirst:
 			if inFragmentedRecord {
 				return nil, fmt.Errorf("%w: partial record without end", db.ErrCorruption)
 			}
 			inFragmentedRecord = true
-			record = make([]byte, len(fragment))
-			copy(record, fragment)
+			record = append(record[:0], fragment...)
 		case logRecordMiddle:
 			if !inFragmentedRecord {
 				return nil, fmt.Errorf("%w: missing start of fragmented record", db.ErrCorruption)

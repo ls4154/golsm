@@ -7,15 +7,26 @@ import (
 	"github.com/ls4154/golsm/util"
 )
 
-type Writer struct {
-	dest        io.Writer
-	blockOffset int
+type flushWriter interface {
+	io.Writer
+	Flush() error
 }
 
-func NewWriter(dest io.Writer) *Writer {
+type Writer struct {
+	dest        flushWriter
+	blockOffset int
+	written     uint64
+}
+
+func NewWriter(dest flushWriter) *Writer {
+	return NewWriterWithOffset(dest, 0)
+}
+
+func NewWriterWithOffset(dest flushWriter, initialOffset uint64) *Writer {
 	w := &Writer{
 		dest:        dest,
-		blockOffset: 0,
+		blockOffset: int(initialOffset % logBlockSize),
+		written:     initialOffset,
 	}
 	return w
 }
@@ -37,14 +48,12 @@ func (w *Writer) AddRecord(data []byte) error {
 				return err
 			}
 			util.Assert(n == leftover)
+			w.written += uint64(n)
 			w.blockOffset = 0
 		}
 
 		avail := logBlockSize - w.blockOffset - logHeaderSize
-		fragmentLength := left
-		if left > avail {
-			fragmentLength = avail
-		}
+		fragmentLength := min(left, avail)
 
 		end := left == fragmentLength
 		var recordType logRecordType
@@ -91,13 +100,19 @@ func (w *Writer) emitPhysicalRecord(t logRecordType, data []byte) error {
 		return err
 	}
 	util.Assert(n == logHeaderSize)
+	w.written += uint64(n)
 	n, err = w.dest.Write(data)
 	if err != nil {
 		return err
 	}
 	util.Assert(n == length)
+	w.written += uint64(n)
 
 	w.blockOffset += logHeaderSize + length
 
-	return nil
+	return w.dest.Flush()
+}
+
+func (w *Writer) Size() uint64 {
+	return w.written
 }

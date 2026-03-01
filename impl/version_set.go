@@ -511,16 +511,17 @@ func (vs *VersionSet) Recover() error {
 
 	{
 		reader := log.NewReader(file)
+		var recordBuf []byte
 
 		for {
-			// TODO record buf reuse
-			record, err := reader.ReadRecord()
+			recordBuf, err = reader.ReadRecordInto(recordBuf)
 			if errors.Is(err, io.EOF) {
 				break
 			} else if err != nil {
 				recoverErr = err
 				break
 			}
+			record := recordBuf
 
 			edit := VersionEdit{}
 			err = edit.DecodeFrom(record)

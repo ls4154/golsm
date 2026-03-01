@@ -230,15 +230,17 @@ func (d *dbImpl) RecoverLogFile(logNum FileNumber, last bool, edit *VersionEdit,
 	compactions := 0
 	var mem *MemTable
 	var recoverErr error
+	var recordBuf []byte
 	// TODO ignore corruption option
 	for {
-		record, err := reader.ReadRecord()
+		recordBuf, err = reader.ReadRecordInto(recordBuf)
 		if errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
 			recoverErr = err
 			break
 		}
+		record := recordBuf
 
 		if len(record) < 12 {
 			recoverErr = fmt.Errorf("%w: log record too small", db.ErrCorruption)
