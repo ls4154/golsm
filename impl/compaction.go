@@ -171,13 +171,16 @@ func (d *dbImpl) NewCompactionOutputBuilder() (*table.TableBuilder, FileNumber, 
 	d.mu.Lock()
 
 	fileNum := d.versions.NewFileNumber()
-	d.RegisterPendingOutput(fileNum) // TODO not cleaned up if new file opening is failed
+	d.RegisterPendingOutput(fileNum)
 
 	d.mu.Unlock()
 
 	fname := TableFileName(d.dbname, fileNum)
 	f, err := d.env.NewWritableFile(fname)
 	if err != nil {
+		d.mu.Lock()
+		d.UnregisterPendingOutput(fileNum)
+		d.mu.Unlock()
 		return nil, 0, nil, err
 	}
 

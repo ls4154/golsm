@@ -207,3 +207,22 @@ func TestDeleteObsoleteFilesEvictsTableCache(t *testing.T) {
 
 	require.Equal(t, int32(1), atomic.LoadInt32(&closed))
 }
+
+func TestNewCompactionOutputBuilderOpenFailureCleansPendingOutput(t *testing.T) {
+	env := &recordingEnv{}
+
+	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false)
+	v := vset.NewVersion()
+	vset.AppendVersion(v)
+
+	d := &dbImpl{
+		dbname:         "db",
+		env:            env,
+		versions:       vset,
+		pendingOutputs: map[FileNumber]struct{}{},
+	}
+
+	_, _, _, err := d.NewCompactionOutputBuilder()
+	require.Error(t, err)
+	require.Empty(t, d.pendingOutputs)
+}
