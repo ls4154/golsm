@@ -39,7 +39,8 @@ type config struct {
 func main() {
 	cfg := parseFlags()
 	printBanner(cfg)
-	printHeader(cfg)
+	headerPrinted := false
+	var ldb db.DB
 
 	for _, name := range cfg.benchmarks {
 		spec, err := benchSpecFor(name)
@@ -48,31 +49,77 @@ func main() {
 		}
 
 		shouldFresh := cfg.freshDB || spec.freshDBByDefault
-		if shouldFresh {
-			if cfg.useExistingDB {
-				fmt.Printf("%-12s %12s\n", name, "skipped (--use_existing_db=true)")
-				continue
-			}
-			if err := os.RemoveAll(cfg.dbPath); err != nil {
-				fatalf("remove db dir: %v", err)
-			}
+		var skipped bool
+		ldb, skipped, err = prepareDBForBenchmark(ldb, cfg, name, shouldFresh)
+		if err != nil {
+			fatalf("%v", err)
+		}
+		if skipped {
+			continue
 		}
 
-		ldb, err := openDB(cfg)
-		if err != nil {
-			fatalf("open db for %s: %v", name, err)
+		if spec.propertyKey != "" {
+			printPropertyBenchmark(ldb, spec.propertyKey)
+			continue
 		}
 
 		r, runErr := runBenchmark(ldb, cfg, spec)
-		closeErr := ldb.Close()
 		if runErr != nil {
 			fatalf("%s: %v", name, runErr)
 		}
-		if closeErr != nil {
-			fatalf("close db after %s: %v", name, closeErr)
+		if !headerPrinted {
+			printHeader(cfg)
+			headerPrinted = true
 		}
 		printResult(cfg, name, r)
 	}
+
+	if ldb != nil {
+		if err := ldb.Close(); err != nil {
+			fatalf("close db: %v", err)
+		}
+	}
+}
+
+func prepareDBForBenchmark(ldb db.DB, cfg config, benchName string, shouldFresh bool) (db.DB, bool, error) {
+	if shouldFresh {
+		if cfg.useExistingDB {
+			fmt.Printf("%-12s %12s\n", benchName, "skipped (--use_existing_db=true)")
+			return ldb, true, nil
+		}
+		return reopenFreshDB(ldb, cfg, benchName)
+	}
+	return openDBIfNeeded(ldb, cfg, benchName)
+}
+
+func reopenFreshDB(ldb db.DB, cfg config, benchName string) (db.DB, bool, error) {
+	var err error
+	if ldb != nil {
+		err = ldb.Close()
+		if err != nil {
+			return nil, false, fmt.Errorf("close db before %s: %w", benchName, err)
+		}
+	}
+	err = os.RemoveAll(cfg.dbPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("remove db dir: %w", err)
+	}
+	ldb, err = openDB(cfg)
+	if err != nil {
+		return nil, false, fmt.Errorf("open db for %s: %w", benchName, err)
+	}
+	return ldb, false, nil
+}
+
+func openDBIfNeeded(ldb db.DB, cfg config, benchName string) (db.DB, bool, error) {
+	if ldb != nil {
+		return ldb, false, nil
+	}
+	newDB, err := openDB(cfg)
+	if err != nil {
+		return nil, false, fmt.Errorf("open db for %s: %w", benchName, err)
+	}
+	return newDB, false, nil
 }
 
 func openDB(cfg config) (db.DB, error) {
@@ -168,7 +215,12 @@ func printResult(cfg config, name string, r runResult) {
 		)
 	}
 	if r.message != "" {
-		fmt.Printf("%-12s %s\n", "", r.message)
+		for _, line := range strings.Split(r.message, "\n") {
+			if line == "" {
+				continue
+			}
+			fmt.Printf("%-12s %s\n", "", line)
+		}
 	}
 }
 
@@ -276,6 +328,15 @@ func parseBenchmarks(raw string) []string {
 		out = append(out, name)
 	}
 	return out
+}
+
+func printPropertyBenchmark(ldb db.DB, key string) {
+	value, ok := ldb.GetProperty(key)
+	if !ok {
+		value = "(failed)"
+	}
+	value = strings.TrimRight(value, "\n")
+	fmt.Printf("\n%s\n", value)
 }
 
 func fatalf(format string, args ...any) {

@@ -6,6 +6,7 @@ type benchSpec struct {
 	name             string
 	freshDBByDefault bool
 	useReads         bool
+	propertyKey      string
 }
 
 func benchSpecFor(name string) (benchSpec, error) {
@@ -22,6 +23,10 @@ func benchSpecFor(name string) (benchSpec, error) {
 		return benchSpec{name: name, freshDBByDefault: false, useReads: true}, nil
 	case "readrandom":
 		return benchSpec{name: name, freshDBByDefault: false, useReads: true}, nil
+	case "stats":
+		return benchSpec{name: name, freshDBByDefault: false, useReads: false, propertyKey: "leveldb.stats"}, nil
+	case "sstables":
+		return benchSpec{name: name, freshDBByDefault: false, useReads: false, propertyKey: "leveldb.sstables"}, nil
 	default:
 		return benchSpec{}, fmt.Errorf("unknown benchmark %q", name)
 	}
