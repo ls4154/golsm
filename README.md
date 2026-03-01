@@ -1,5 +1,7 @@
 # golsm
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/ls4154/golsm.svg)](https://pkg.go.dev/github.com/ls4154/golsm)
+
 A Go implementation of an LSM-tree based key-value store with LevelDB-compatible on-disk formats.
 
 ## Features
@@ -8,10 +10,10 @@ A Go implementation of an LSM-tree based key-value store with LevelDB-compatible
 - Range scan via bidirectional iterators
 - Atomic batch writes
 - Snapshots
-- Background memtable flush and multi-level compaction
+- Background compaction
 - Snappy block compression
-- Block cache (LRU)
-- LevelDB-compatible on-disk format (WAL, MANIFEST, SSTable / `.ldb`)
+- Block cache
+- LevelDB-compatible on-disk format (WAL, MANIFEST, SSTable)
 - Bloom filter
 
 ## Usage
