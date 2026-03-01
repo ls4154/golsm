@@ -118,6 +118,12 @@ func (c *LRUCache[T]) Erase(key []byte) {
 	c.unref(h)
 }
 
+func (c *LRUCache[T]) TotalCharge() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.usage
+}
+
 func (c *LRUCache[T]) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()

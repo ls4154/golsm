@@ -29,6 +29,10 @@ type DB interface {
 	// Pass it via ReadOptions.Snapshot for consistent reads.
 	// The snapshot must be released by calling Release when no longer needed.
 	GetSnapshot() Snapshot
+	// GetProperty returns a textual debug property value.
+	// It returns (value, true) when the property is recognized.
+	// Unknown property names return ("", false).
+	GetProperty(name string) (string, bool)
 	// Close shuts down the database and releases all remaining resources.
 	// Callers must stop issuing new reads/writes and release all outstanding iterators/snapshots before calling Close.
 	Close() error

@@ -38,6 +38,10 @@ func (c *BlockCache) Insert(key BlockCacheKey, block *Block) func() {
 	}
 }
 
+func (c *BlockCache) TotalCharge() int {
+	return c.lru.TotalCharge()
+}
+
 func BuildBlockCacheKey(id, offset uint64) BlockCacheKey {
 	cacheKey := BlockCacheKey{}
 	binary.LittleEndian.PutUint64(cacheKey[0:], id)

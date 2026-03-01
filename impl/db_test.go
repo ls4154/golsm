@@ -2,11 +2,13 @@ package impl
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/ls4154/golsm/db"
+	"github.com/ls4154/golsm/util"
 	"github.com/stretchr/testify/require"
 )
 
@@ -64,6 +66,69 @@ func TestDBBasic(t *testing.T) {
 	require.ErrorIs(t, err, db.ErrNotFound)
 
 	ldb.Close()
+}
+
+func TestGetProperty(t *testing.T) {
+	testDir := t.TempDir()
+	ldb, err := Open(db.DefaultOptions(), testDir)
+	require.NoError(t, err)
+	defer ldb.Close()
+
+	stats, ok := ldb.GetProperty("leveldb.stats")
+	require.True(t, ok)
+	require.Contains(t, stats, "Compactions")
+	_, ok = ldb.GetProperty("stats")
+	require.False(t, ok)
+
+	files, ok := ldb.GetProperty("leveldb.num-files-at-level0")
+	require.True(t, ok)
+	require.Regexp(t, `^\d+$`, files)
+
+	_, ok = ldb.GetProperty("leveldb.num-files-at-levelx")
+	require.False(t, ok)
+
+	_, ok = ldb.GetProperty("leveldb.num-files-at-level99")
+	require.False(t, ok)
+	_, ok = ldb.GetProperty("leveldb.num-files-at-level+1")
+	require.False(t, ok)
+
+	sstables, ok := ldb.GetProperty("leveldb.sstables")
+	require.True(t, ok)
+	require.Contains(t, sstables, "--- level 0 ---")
+
+	memUsage, ok := ldb.GetProperty("leveldb.approximate-memory-usage")
+	require.True(t, ok)
+	require.Regexp(t, `^\d+$`, memUsage)
+
+	_, ok = ldb.GetProperty("unknown.property")
+	require.False(t, ok)
+}
+
+func TestGetPropertyStatsIncludesLevelWithRecordedStats(t *testing.T) {
+	env := &recordingEnv{}
+	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false)
+	v := vset.NewVersion()
+	vset.AppendVersion(v)
+
+	d := &dbImpl{
+		versions: vset,
+	}
+
+	d.mu.Lock()
+	d.addCompactionStats(1, 2*time.Second, 3*1024*1024, 4*1024*1024)
+	d.mu.Unlock()
+
+	stats, ok := d.GetProperty("leveldb.stats")
+	require.True(t, ok)
+
+	foundLevel1 := false
+	for _, line := range strings.Split(stats, "\n") {
+		if strings.HasPrefix(line, "  1 ") {
+			foundLevel1 = true
+			break
+		}
+	}
+	require.True(t, foundLevel1)
 }
 
 func TestBatch(t *testing.T) {

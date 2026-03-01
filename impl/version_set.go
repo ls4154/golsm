@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -779,6 +781,42 @@ func (vs *VersionSet) LiveFiles() map[FileNumber]struct{} {
 
 func (vs *VersionSet) NumLevelFiles(level Level) int {
 	return len(vs.current.files[level])
+}
+
+func (vs *VersionSet) NumLevelBytes(level Level) uint64 {
+	return totalFileSize(vs.current.files[level])
+}
+
+func (v *Version) DebugString() string {
+	var b strings.Builder
+	for level := range NumLevels {
+		fmt.Fprintf(&b, "--- level %d ---\n", level)
+		files := v.files[level]
+		for _, f := range files {
+			fmt.Fprintf(&b, " %d:%d[%s .. %s]\n",
+				f.number,
+				f.size,
+				debugInternalKey(f.smallest),
+				debugInternalKey(f.largest),
+			)
+		}
+	}
+	return b.String()
+}
+
+func debugInternalKey(ikey []byte) string {
+	parsed, err := ParseInternalKey(ikey)
+	if err != nil {
+		return "(bad)" + escapeBytes(ikey)
+	}
+	return "'" + escapeBytes(parsed.UserKey) + "' @ " +
+		strconv.FormatUint(uint64(parsed.Sequence), 10) + " : " +
+		strconv.Itoa(int(parsed.Type))
+}
+
+func escapeBytes(b []byte) string {
+	q := strconv.QuoteToASCII(string(b))
+	return q[1 : len(q)-1]
 }
 
 func totalFileSize(files []*FileMetaData) uint64 {

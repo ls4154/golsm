@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	stdlog "log"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -48,6 +47,8 @@ type dbImpl struct {
 	bgErr  error
 
 	logger db.Logger
+
+	compactionStats [NumLevels]CompactionStats
 }
 
 func Open(userOpt *db.Options, dbname string) (db.DB, error) {
@@ -332,7 +333,6 @@ func (d *dbImpl) newDB() error {
 func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit, fnum FileNumber) error {
 	util.AssertMutexHeld(&d.mu)
 
-	// TODO stats
 	startTime := time.Now()
 
 	meta := FileMetaData{
@@ -348,7 +348,8 @@ func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit, fnum FileNum
 	err := BuildTable(d.dbname, d.env, iter, d.icmp, d.options, d.ifilter, &meta)
 	d.mu.Lock()
 
-	d.logger.Printf("Level-0 table #%d: %d bytes %s", meta.number, meta.size, err)
+	d.logger.Printf("Level-0 table #%d: %d bytes %s", meta.number, meta.size, statusForLog(err))
+	d.addCompactionStats(0, time.Since(startTime), 0, meta.size)
 
 	if err != nil {
 		return err
@@ -545,19 +546,6 @@ func (d *dbImpl) Close() error {
 	}
 
 	return nil
-}
-
-func openInfoLogger(env db.Env, dbname string, logger db.Logger) (db.Logger, db.WritableFile, error) {
-	if logger != nil {
-		return logger, nil, nil
-	}
-
-	f, err := env.NewAppendableFile(InfoLogFileName(dbname))
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return stdlog.New(f, "", stdlog.LstdFlags), f, nil
 }
 
 func SetCurrentFile(env db.Env, dbname string, num FileNumber) error {

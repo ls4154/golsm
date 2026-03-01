@@ -20,7 +20,7 @@ func (d *dbImpl) doTrivialMove(c *Compaction) error {
 		d.RecordBackgroundError(err)
 	}
 
-	d.logger.Printf("Moved #%d to level-%d %d bytes %v\n", f.number, c.level+1, f.size, err)
+	d.logger.Printf("Moved #%d to level-%d %d bytes %s", f.number, c.level+1, f.size, statusForLog(err))
 	return err
 }
 
@@ -58,8 +58,6 @@ func (d *dbImpl) doCompactionWork(c *Compaction) error {
 
 	input.SeekToFirst()
 	for input.Valid() {
-		// TODO cancel if shutting down
-
 		key := input.Key()
 
 		// TODO check split
@@ -131,8 +129,6 @@ func (d *dbImpl) doCompactionWork(c *Compaction) error {
 		input.Next()
 	}
 
-	// TODO shutting down
-
 	if err == nil && builder != nil {
 		finErr := d.FinishCompactionOutputFile(curOutput, curOutfile, builder, input.Error() != nil)
 		if finErr != nil {
@@ -153,9 +149,15 @@ func (d *dbImpl) doCompactionWork(c *Compaction) error {
 
 	elapsed := time.Now().Sub(startTime)
 	d.logger.Printf("compaction time: %s", elapsed)
+	var bytesRead uint64
+	for i := range 2 {
+		bytesRead += totalFileSize(c.inputs[i])
+	}
+	bytesWritten := totalFileSize(outputs)
+	d.addCompactionStats(c.level+1, elapsed, bytesRead, bytesWritten)
 
 	if err == nil {
-		err = d.ApplyCompaction(c, outputs)
+		err = d.ApplyCompaction(c, outputs, bytesWritten)
 	}
 
 	if err != nil {
@@ -202,7 +204,6 @@ func (d *dbImpl) FinishCompactionOutputFile(out *FileMetaData, outfile db.Writab
 	currentBytes := builder.FileSize()
 
 	out.size = currentBytes
-	// TODO total bytes
 
 	if err == nil {
 		err = outfile.Sync()
@@ -218,14 +219,14 @@ func (d *dbImpl) FinishCompactionOutputFile(out *FileMetaData, outfile db.Writab
 	return err
 }
 
-func (d *dbImpl) ApplyCompaction(c *Compaction, outputs []*FileMetaData) error {
+func (d *dbImpl) ApplyCompaction(c *Compaction, outputs []*FileMetaData, totalOutputBytes uint64) error {
 	util.AssertMutexHeld(&d.mu)
 
 	d.logger.Printf("Compacted %d@%d + %d@%d files => %d bytes",
-		len(c.inputs[0]), c.level, len(c.inputs[1]), c.level+1, 12345)
+		len(c.inputs[0]), c.level, len(c.inputs[1]), c.level+1, totalOutputBytes)
 
 	// delete input files
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		for _, f := range c.inputs[i] {
 			c.edit.RemoveFile(f.number, f.level)
 		}
