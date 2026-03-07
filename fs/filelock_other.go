@@ -1,6 +1,6 @@
 //go:build !linux && !darwin
 
-package util
+package fs
 
 import "os"
 

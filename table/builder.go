@@ -2,9 +2,10 @@ package table
 
 import (
 	"encoding/binary"
-	"fmt"
+	"io"
 
 	"github.com/ls4154/golsm/db"
+	"github.com/ls4154/golsm/fs"
 	"github.com/ls4154/golsm/util"
 )
 
@@ -14,7 +15,7 @@ type TableBuilder struct {
 	compression     db.CompressionType
 	restartInterval int
 
-	file   db.WritableFile
+	file   fs.WritableFile
 	offset uint64
 
 	block         *BlockBuilder
@@ -34,7 +35,7 @@ type TableBuilder struct {
 	closed bool
 }
 
-func NewTableBuilder(file db.WritableFile, cmp db.Comparator, blockSize int, compression db.CompressionType,
+func NewTableBuilder(file fs.WritableFile, cmp db.Comparator, blockSize int, compression db.CompressionType,
 	restartInterval int, filterPolicy db.FilterPolicy,
 ) *TableBuilder {
 	b := &TableBuilder{
@@ -102,7 +103,7 @@ func (b *TableBuilder) Flush() {
 
 	err := b.file.Flush()
 	if err != nil {
-		b.err = err
+		b.err = util.WrapIOError(err, "flush table block")
 	}
 
 	if b.filterBlock != nil {
@@ -146,11 +147,11 @@ func (b *TableBuilder) writeRawBlock(contents []byte, compression db.Compression
 
 	n, err := b.file.Write(contents)
 	if err != nil {
-		b.err = err
+		b.err = util.WrapIOError(err, "write table block")
 		return
 	}
 	if n < len(contents) {
-		b.err = fmt.Errorf("write %d < %d", n, len(contents))
+		b.err = util.WrapIOError(io.ErrShortWrite, "write table block")
 		return
 	}
 
@@ -165,11 +166,11 @@ func (b *TableBuilder) writeRawBlock(contents []byte, compression db.Compression
 
 	n, err = b.file.Write(trailer[:])
 	if err != nil {
-		b.err = err
+		b.err = util.WrapIOError(err, "write table block trailer")
 		return
 	}
 	if n < len(trailer) {
-		b.err = fmt.Errorf("write %d < %d", n, len(contents))
+		b.err = util.WrapIOError(io.ErrShortWrite, "write table block trailer")
 		return
 	}
 
@@ -232,18 +233,18 @@ func (b *TableBuilder) Finish() error {
 	encoded := footer.Append(buf[:0])
 	n, err := b.file.Write(encoded)
 	if err != nil {
-		b.err = err
+		b.err = util.WrapIOError(err, "write table footer")
 		return b.err
 	}
 	if n < len(encoded) {
-		b.err = fmt.Errorf("write %d < %d", n, len(encoded))
+		b.err = util.WrapIOError(io.ErrShortWrite, "write table footer")
 		return b.err
 	}
 	b.offset += uint64(len(encoded))
 
 	err = b.file.Flush()
 	if err != nil {
-		b.err = err
+		b.err = util.WrapIOError(err, "flush table footer")
 		return b.err
 	}
 

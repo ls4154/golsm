@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/ls4154/golsm/db"
+	"github.com/ls4154/golsm/fs"
 	"github.com/ls4154/golsm/table"
 	"github.com/ls4154/golsm/util"
 )
@@ -52,7 +53,7 @@ func (d *dbImpl) doCompactionWork(c *Compaction) error {
 	var builder *table.TableBuilder
 	var outputs []*FileMetaData
 	var curOutput *FileMetaData
-	var curOutfile db.WritableFile
+	var curOutfile fs.WritableFile
 
 	var levelPtrs [NumLevels]int
 
@@ -169,7 +170,7 @@ func (d *dbImpl) doCompactionWork(c *Compaction) error {
 	return err
 }
 
-func (d *dbImpl) NewCompactionOutputBuilder() (*table.TableBuilder, FileNumber, db.WritableFile, error) {
+func (d *dbImpl) NewCompactionOutputBuilder() (*table.TableBuilder, FileNumber, fs.WritableFile, error) {
 	d.mu.Lock()
 
 	fileNum := d.versions.NewFileNumber()
@@ -183,21 +184,20 @@ func (d *dbImpl) NewCompactionOutputBuilder() (*table.TableBuilder, FileNumber, 
 		d.mu.Lock()
 		d.UnregisterPendingOutput(fileNum)
 		d.mu.Unlock()
-		return nil, 0, nil, err
+		return nil, 0, nil, wrapIOError(err, "create compaction output %s", fname)
 	}
 
 	return table.NewTableBuilder(f, d.icmp, d.options.BlockSize, d.options.Compression, d.options.BlockRestartInterval, d.ifilter),
 		fileNum, f, nil
 }
 
-func (d *dbImpl) FinishCompactionOutputFile(out *FileMetaData, outfile db.WritableFile, builder *table.TableBuilder,
+func (d *dbImpl) FinishCompactionOutputFile(out *FileMetaData, outfile fs.WritableFile, builder *table.TableBuilder,
 	abandon bool,
 ) error {
-	var err error
 	if abandon {
 		builder.Abandon()
-	} else {
-		err = builder.Finish()
+	} else if err := builder.Finish(); err != nil {
+		return err
 	}
 
 	currentEntries := builder.NumEntries()
@@ -205,18 +205,18 @@ func (d *dbImpl) FinishCompactionOutputFile(out *FileMetaData, outfile db.Writab
 
 	out.size = currentBytes
 
-	if err == nil {
-		err = outfile.Sync()
-	}
-	if err == nil {
-		err = outfile.Close()
-	}
-
-	// check table file?
-
 	d.logger.Printf("Generated table #%d@%d: %d keys, %d bytes", out.number, out.level, currentEntries, currentBytes)
 
-	return err
+	if err := outfile.Sync(); err != nil {
+		return wrapIOError(err, "sync compaction output #%d", out.number)
+	}
+	if err := outfile.Close(); err != nil {
+		return wrapIOError(err, "close compaction output #%d", out.number)
+	}
+
+	// open to check?
+
+	return nil
 }
 
 func (d *dbImpl) ApplyCompaction(c *Compaction, outputs []*FileMetaData, totalOutputBytes uint64) error {
@@ -239,7 +239,7 @@ func (d *dbImpl) ApplyCompaction(c *Compaction, outputs []*FileMetaData, totalOu
 	return d.versions.LogAndApply(&c.edit, &d.mu)
 }
 
-func (d *dbImpl) CleaunupCompaction(builder *table.TableBuilder, file db.WritableFile, outputs []*FileMetaData) {
+func (d *dbImpl) CleaunupCompaction(builder *table.TableBuilder, file fs.WritableFile, outputs []*FileMetaData) {
 	util.AssertMutexHeld(&d.mu)
 
 	if builder != nil {

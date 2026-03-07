@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ls4154/golsm/db"
+	"github.com/ls4154/golsm/fs"
 	"github.com/ls4154/golsm/log"
 	"github.com/ls4154/golsm/table"
 	"github.com/ls4154/golsm/util"
@@ -32,16 +33,16 @@ type dbImpl struct {
 	// immutable memtable being flushed to level-0
 	imm         *MemTable
 	mu          sync.Mutex
-	env         db.Env
+	env         fs.Env
 	log         *log.Writer
-	logfile     db.WritableFile
+	logfile     fs.WritableFile
 	logfileNum  FileNumber
-	infoLogFile db.WritableFile
+	infoLogFile fs.WritableFile
 
 	writeSerializer *writeSerializer
 	bgWork          *bgWork
 
-	fileLock db.FileLock
+	fileLock fs.FileLock
 
 	closed bool
 	bgErr  error
@@ -61,7 +62,7 @@ func Open(userOpt *db.Options, dbname string) (db.DB, error) {
 		userCmp: opt.Comparator,
 	}
 	ifilter := newInternalFilterPolicy(opt.FilterPolicy)
-	env := util.DefaultEnv()
+	env := fs.Default()
 	_ = env.CreateDir(dbname)
 
 	logger, infoLogFile, err := openInfoLogger(env, dbname, opt.Logger)
@@ -113,7 +114,7 @@ func Open(userOpt *db.Options, dbname string) (db.DB, error) {
 		fname := LogFileName(db.dbname, newLogNumber)
 		f, err := db.env.NewWritableFile(fname)
 		if err != nil {
-			return nil, err
+			return nil, wrapIOError(err, "create log file %s", fname)
 		}
 		edit.SetLogNumber(newLogNumber)
 		db.logfile = f
@@ -144,7 +145,7 @@ func (d *dbImpl) recover(edit *VersionEdit) error {
 
 	lock, err := d.env.LockFile(LockFileName(d.dbname))
 	if err != nil {
-		return fmt.Errorf("failed to acquire DB lock: %w", err)
+		return wrapIOError(err, "acquire DB lock %s", LockFileName(d.dbname))
 	}
 	d.fileLock = lock
 
@@ -175,7 +176,7 @@ func (d *dbImpl) recover(edit *VersionEdit) error {
 
 	filenames, err := d.env.GetChildren(d.dbname)
 	if err != nil {
-		return err
+		return wrapIOError(err, "list DB directory %s", d.dbname)
 	}
 
 	expected := d.versions.LiveFiles()
@@ -222,7 +223,10 @@ func (d *dbImpl) RecoverLogFile(logNum FileNumber, last bool, edit *VersionEdit,
 	fname := LogFileName(d.dbname, logNum)
 	f, err := d.env.NewSequentialFile(fname)
 	if err != nil {
-		return err
+		if fs.IsNotExist(err) {
+			return fmt.Errorf("%w: missing log file %s", db.ErrCorruption, fname)
+		}
+		return wrapIOError(err, "open log file %s", fname)
 	}
 	defer f.Close()
 
@@ -300,7 +304,7 @@ func (d *dbImpl) newDB() error {
 	manifest := DescriptorFileName(d.dbname, 1)
 	f, err := d.env.NewWritableFile(manifest)
 	if err != nil {
-		return err
+		return wrapIOError(err, "create manifest %s", manifest)
 	}
 
 	defer func() {
@@ -316,16 +320,16 @@ func (d *dbImpl) newDB() error {
 	record := edit.Append(nil)
 	err = writer.AddRecord(record)
 	if err != nil {
-		return err
+		return wrapIOError(err, "write initial manifest %s", manifest)
 	}
 
 	err = f.Sync()
 	if err != nil {
-		return err
+		return wrapIOError(err, "sync manifest %s", manifest)
 	}
 	err = f.Close()
 	if err != nil {
-		return err
+		return wrapIOError(err, "close manifest %s", manifest)
 	}
 	f = nil
 
@@ -550,36 +554,36 @@ func (d *dbImpl) Close() error {
 	return nil
 }
 
-func SetCurrentFile(env db.Env, dbname string, num FileNumber) error {
+func SetCurrentFile(env fs.Env, dbname string, num FileNumber) error {
 	manifest := DescriptorFileName(dbname, num)
 	contents := filepath.Base(manifest)
 
 	tmp := TempFileName(dbname, num)
 	f, err := env.NewWritableFile(tmp)
 	if err != nil {
-		return err
+		return wrapIOError(err, "create temp CURRENT file %s", tmp)
 	}
 
 	_, err = io.WriteString(f, contents+"\n")
 	if err != nil {
 		env.RemoveFile(tmp)
-		return err
+		return wrapIOError(err, "write temp CURRENT file %s", tmp)
 	}
 	err = f.Sync()
 	if err != nil {
 		env.RemoveFile(tmp)
-		return err
+		return wrapIOError(err, "sync temp CURRENT file %s", tmp)
 	}
 	err = f.Close()
 	if err != nil {
 		env.RemoveFile(tmp)
-		return err
+		return wrapIOError(err, "close temp CURRENT file %s", tmp)
 	}
 
 	err = env.RenameFile(tmp, CurrentFileName(dbname))
 	if err != nil {
 		env.RemoveFile(tmp)
-		return err
+		return wrapIOError(err, "rename %s to %s", tmp, CurrentFileName(dbname))
 	}
 
 	return nil

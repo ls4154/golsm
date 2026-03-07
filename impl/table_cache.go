@@ -2,21 +2,23 @@ package impl
 
 import (
 	"encoding/binary"
+	"errors"
 	"sync/atomic"
 
 	"github.com/ls4154/golsm/db"
+	"github.com/ls4154/golsm/fs"
 	"github.com/ls4154/golsm/table"
 	"github.com/ls4154/golsm/util"
 )
 
 type tableAndFile struct {
-	file  db.RandomAccessFile
+	file  fs.RandomAccessFile
 	table *table.Table
 }
 
 type TableCache struct {
 	dbname         string
-	env            db.Env
+	env            fs.Env
 	cmp            db.Comparator
 	filter         db.FilterPolicy
 	paranoidChecks bool
@@ -27,7 +29,7 @@ type TableCache struct {
 	cacheID atomic.Uint64
 }
 
-func NewTableCache(dbname string, env db.Env, size int, cmp db.Comparator, filter db.FilterPolicy,
+func NewTableCache(dbname string, env fs.Env, size int, cmp db.Comparator, filter db.FilterPolicy,
 	bcache *table.BlockCache, paranoidChecks bool) *TableCache {
 	lru := util.NewLRUCache[tableAndFile](size)
 	lru.SetOnEvict(func(_ []byte, v *tableAndFile) {
@@ -54,7 +56,7 @@ func (tc *TableCache) Get(num FileNumber, size uint64, key []byte, handleFn func
 	defer tc.lru.Release(handle)
 
 	tbl := handle.Value().table
-	return tbl.InternalGet(key, handleFn, verifyChecksum, bypassCache)
+	return wrapIOError(tbl.InternalGet(key, handleFn, verifyChecksum, bypassCache), "read table #%d", num)
 }
 
 func (tc *TableCache) NewIterator(num FileNumber, size uint64, verifyChecksum, bypassCache bool) (db.Iterator, error) {
@@ -90,10 +92,13 @@ func (tc *TableCache) findTable(num FileNumber, size uint64) (*util.LRUHandle[ta
 	fname := TableFileName(tc.dbname, num)
 	f, err := tc.env.NewRandomAccessFile(fname)
 	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return nil, wrapIOError(err, "open table file %s", fname)
+		}
 		oldFname := SSTTableFileName(tc.dbname, num)
 		f, err = tc.env.NewRandomAccessFile(oldFname)
 		if err != nil {
-			return nil, err
+			return nil, wrapIOError(err, "open table file %s", oldFname)
 		}
 	}
 
@@ -101,7 +106,7 @@ func (tc *TableCache) findTable(num FileNumber, size uint64) (*util.LRUHandle[ta
 	tbl, err := table.OpenTable(f, size, tc.cmp, tc.filter, tc.bcache, cacheID, tc.paranoidChecks)
 	if err != nil {
 		_ = f.Close()
-		return nil, err
+		return nil, wrapIOError(err, "open table #%d", num)
 	}
 
 	return tc.lru.Insert(key, tableAndFile{

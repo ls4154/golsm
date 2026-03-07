@@ -45,7 +45,7 @@ func (w *Writer) AddRecord(data []byte) error {
 		if leftover < logHeaderSize {
 			n, err := w.dest.Write(zeroArray[:leftover])
 			if err != nil {
-				return err
+				return util.WrapIOError(err, "fill log block trailer")
 			}
 			util.Assert(n == leftover)
 			w.written += uint64(n)
@@ -97,20 +97,23 @@ func (w *Writer) emitPhysicalRecord(t logRecordType, data []byte) error {
 
 	n, err := w.dest.Write(buf[0:])
 	if err != nil {
-		return err
+		return util.WrapIOError(err, "write log record header")
 	}
 	util.Assert(n == logHeaderSize)
 	w.written += uint64(n)
 	n, err = w.dest.Write(data)
 	if err != nil {
-		return err
+		return util.WrapIOError(err, "write log record body")
 	}
 	util.Assert(n == length)
 	w.written += uint64(n)
 
 	w.blockOffset += logHeaderSize + length
 
-	return w.dest.Flush()
+	if err := w.dest.Flush(); err != nil {
+		return util.WrapIOError(err, "flush log writer")
+	}
+	return nil
 }
 
 func (w *Writer) Size() uint64 {

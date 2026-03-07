@@ -5,10 +5,11 @@ import (
 	stdlog "log"
 
 	"github.com/ls4154/golsm/db"
+	"github.com/ls4154/golsm/fs"
 )
 
 type flushOnWrite struct {
-	f db.WritableFile
+	f fs.WritableFile
 }
 
 func (w *flushOnWrite) Write(p []byte) (int, error) {
@@ -25,14 +26,14 @@ func (w *flushOnWrite) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func openInfoLogger(env db.Env, dbname string, logger db.Logger) (db.Logger, db.WritableFile, error) {
+func openInfoLogger(env fs.Env, dbname string, logger db.Logger) (db.Logger, fs.WritableFile, error) {
 	if logger != nil {
 		return logger, nil, nil
 	}
 
 	f, err := env.NewAppendableFile(InfoLogFileName(dbname))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, wrapIOError(err, "open info log %s", InfoLogFileName(dbname))
 	}
 
 	return stdlog.New(&flushOnWrite{f: f}, "", stdlog.LstdFlags|stdlog.Lmicroseconds), f, nil

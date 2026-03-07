@@ -192,6 +192,8 @@ func (d *dbImpl) applyBatch(batch *WriteBatchImpl, sync bool) error {
 		err = batch.InsertIntoMemTable(d.mem)
 	}
 
+	err = wrapIOError(err, "write batch to log")
+
 	d.versions.SetLastSequence(lastSeq + SequenceNumber(batch.count()))
 
 	return err
@@ -230,12 +232,12 @@ func (d *dbImpl) makeRoomForWrite(force bool) error {
 			f, err := d.env.NewWritableFile(LogFileName(d.dbname, logNum))
 			if err != nil {
 				// TODO reuse file number?
-				return err
+				return wrapIOError(err, "create log file %s", LogFileName(d.dbname, logNum))
 			}
 
 			err = d.logfile.Close()
 			if err != nil {
-				d.RecordBackgroundError(err)
+				d.RecordBackgroundError(wrapIOError(err, "close previous log file"))
 			}
 
 			d.logfile = f

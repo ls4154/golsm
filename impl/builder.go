@@ -2,10 +2,11 @@ package impl
 
 import (
 	"github.com/ls4154/golsm/db"
+	"github.com/ls4154/golsm/fs"
 	"github.com/ls4154/golsm/table"
 )
 
-func BuildTable(dbname string, env db.Env, iter db.Iterator,
+func BuildTable(dbname string, env fs.Env, iter db.Iterator,
 	icmp *InternalKeyComparator, options *db.Options, filterPolicy db.FilterPolicy, meta *FileMetaData,
 ) error {
 	iter.SeekToFirst()
@@ -16,7 +17,7 @@ func BuildTable(dbname string, env db.Env, iter db.Iterator,
 	fname := TableFileName(dbname, meta.number)
 	f, err := env.NewWritableFile(fname)
 	if err != nil {
-		return err
+		return wrapIOError(err, "create table file %s", fname)
 	}
 
 	defer func() {
@@ -48,11 +49,11 @@ func BuildTable(dbname string, env db.Env, iter db.Iterator,
 
 	err = f.Sync()
 	if err != nil {
-		return err
+		return wrapIOError(err, "sync table file %s", fname)
 	}
 	err = f.Close()
 	if err != nil {
-		return err
+		return wrapIOError(err, "close table file %s", fname)
 	}
 	f = nil
 

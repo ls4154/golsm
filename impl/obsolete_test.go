@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ls4154/golsm/db"
+	"github.com/ls4154/golsm/fs"
 	"github.com/ls4154/golsm/util"
 	"github.com/stretchr/testify/require"
 )
@@ -14,19 +15,19 @@ type recordingEnv struct {
 	removed  []string
 }
 
-func (e *recordingEnv) NewSequentialFile(name string) (db.SequentialFile, error) {
+func (e *recordingEnv) NewSequentialFile(name string) (fs.SequentialFile, error) {
 	return nil, db.ErrNotSupported
 }
 
-func (e *recordingEnv) NewRandomAccessFile(name string) (db.RandomAccessFile, error) {
+func (e *recordingEnv) NewRandomAccessFile(name string) (fs.RandomAccessFile, error) {
 	return nil, db.ErrNotSupported
 }
 
-func (e *recordingEnv) NewWritableFile(name string) (db.WritableFile, error) {
+func (e *recordingEnv) NewWritableFile(name string) (fs.WritableFile, error) {
 	return nil, db.ErrNotSupported
 }
 
-func (e *recordingEnv) NewAppendableFile(name string) (db.WritableFile, error) {
+func (e *recordingEnv) NewAppendableFile(name string) (fs.WritableFile, error) {
 	return nil, db.ErrNotSupported
 }
 
@@ -59,11 +60,11 @@ func (e *recordingEnv) RemoveDir(name string) error {
 	return db.ErrNotSupported
 }
 
-func (e *recordingEnv) LockFile(name string) (db.FileLock, error) {
+func (e *recordingEnv) LockFile(name string) (fs.FileLock, error) {
 	return nil, db.ErrNotSupported
 }
 
-func (e *recordingEnv) UnlockFile(lock db.FileLock) error {
+func (e *recordingEnv) UnlockFile(lock fs.FileLock) error {
 	return db.ErrNotSupported
 }
 

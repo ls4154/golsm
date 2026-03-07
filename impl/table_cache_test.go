@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ls4154/golsm/db"
+	"github.com/ls4154/golsm/fs"
 	"github.com/ls4154/golsm/table"
 	"github.com/ls4154/golsm/util"
 	"github.com/stretchr/testify/require"
@@ -70,14 +71,14 @@ type memEnv struct {
 	closed map[string]*int32
 }
 
-func (e *memEnv) NewSequentialFile(name string) (db.SequentialFile, error) {
+func (e *memEnv) NewSequentialFile(name string) (fs.SequentialFile, error) {
 	return nil, db.ErrNotSupported
 }
 
-func (e *memEnv) NewRandomAccessFile(name string) (db.RandomAccessFile, error) {
+func (e *memEnv) NewRandomAccessFile(name string) (fs.RandomAccessFile, error) {
 	data, ok := e.files[name]
 	if !ok {
-		return nil, db.ErrNotFound
+		return nil, fs.ErrNotExist
 	}
 	counter, ok := e.closed[name]
 	if !ok {
@@ -88,11 +89,11 @@ func (e *memEnv) NewRandomAccessFile(name string) (db.RandomAccessFile, error) {
 	return &memRandomAccessFile{data: data, closed: counter}, nil
 }
 
-func (e *memEnv) NewWritableFile(name string) (db.WritableFile, error) {
+func (e *memEnv) NewWritableFile(name string) (fs.WritableFile, error) {
 	return nil, db.ErrNotSupported
 }
 
-func (e *memEnv) NewAppendableFile(name string) (db.WritableFile, error) {
+func (e *memEnv) NewAppendableFile(name string) (fs.WritableFile, error) {
 	return nil, db.ErrNotSupported
 }
 
@@ -112,7 +113,7 @@ func (e *memEnv) FileExists(name string) bool {
 func (e *memEnv) GetFileSize(name string) (uint64, error) {
 	data, ok := e.files[name]
 	if !ok {
-		return 0, db.ErrNotFound
+		return 0, fs.ErrNotExist
 	}
 	return uint64(len(data)), nil
 }
@@ -129,11 +130,11 @@ func (e *memEnv) RemoveDir(name string) error {
 	return db.ErrNotSupported
 }
 
-func (e *memEnv) LockFile(name string) (db.FileLock, error) {
+func (e *memEnv) LockFile(name string) (fs.FileLock, error) {
 	return nil, db.ErrNotSupported
 }
 
-func (e *memEnv) UnlockFile(lock db.FileLock) error {
+func (e *memEnv) UnlockFile(lock fs.FileLock) error {
 	return db.ErrNotSupported
 }
 

@@ -5,12 +5,13 @@ import (
 	"testing"
 
 	"github.com/ls4154/golsm/db"
+	"github.com/ls4154/golsm/fs"
 	"github.com/ls4154/golsm/util"
 	"github.com/stretchr/testify/require"
 )
 
 func TestTable(t *testing.T) {
-	env := util.DefaultEnv()
+	env := fs.Default()
 	for _, numEntries := range []int{1, 10, 100, 1000, 10000, 100000} {
 		t.Run(fmt.Sprintf("numEntries=%d", numEntries), func(t *testing.T) {
 			fname := fmt.Sprintf("%06d.ldb", numEntries)
@@ -21,7 +22,7 @@ func TestTable(t *testing.T) {
 }
 
 func TestTableSnappy(t *testing.T) {
-	env := util.DefaultEnv()
+	env := fs.Default()
 	for _, numEntries := range []int{1, 10, 100, 1000, 10000, 100000} {
 		t.Run(fmt.Sprintf("numEntries=%d", numEntries), func(t *testing.T) {
 			fname := fmt.Sprintf("%06d.ldb", numEntries)
@@ -31,7 +32,7 @@ func TestTableSnappy(t *testing.T) {
 	}
 }
 
-func writeTable(t *testing.T, env db.Env, name string, numEntries int, compression db.CompressionType) {
+func writeTable(t *testing.T, env fs.Env, name string, numEntries int, compression db.CompressionType) {
 	file, err := env.NewWritableFile(name)
 	require.NoError(t, err, "failed to open file")
 	defer file.Close()
@@ -53,7 +54,7 @@ func writeTable(t *testing.T, env db.Env, name string, numEntries int, compressi
 	require.Equal(t, builderSize, fileSize)
 }
 
-func readTable(t *testing.T, env db.Env, name string, numEntries int) {
+func readTable(t *testing.T, env fs.Env, name string, numEntries int) {
 	file, err := env.NewRandomAccessFile(name)
 	require.NoError(t, err, "failed to open file")
 	defer file.Close()

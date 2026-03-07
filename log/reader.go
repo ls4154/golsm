@@ -95,7 +95,7 @@ func (r *Reader) readPhysicalRecord() ([]byte, logRecordType, error) {
 			if !r.eof {
 				n, err := r.src.Read(r.backingStore[:])
 				if err != nil && !errors.Is(err, io.EOF) {
-					return nil, logRecordBad, fmt.Errorf("%w: %s", db.ErrIO, err)
+					return nil, logRecordBad, util.WrapIOError(err, "read log block")
 				}
 
 				r.buf = r.backingStore[:n]

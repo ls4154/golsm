@@ -1,6 +1,6 @@
 //go:build linux || darwin
 
-package util
+package fs
 
 import (
 	"os"
@@ -13,12 +13,12 @@ func lockFile(f *os.File) error {
 		Type:   syscall.F_WRLCK,
 		Whence: 0, // SEEK_SET
 		Start:  0,
-		Len:    0, // 0 = 전체 파일
+		Len:    0, // 0 = whole file
 	}
 	_, _, errno := syscall.Syscall(
 		syscall.SYS_FCNTL,
 		f.Fd(),
-		syscall.F_SETLK, // non-blocking
+		syscall.F_SETLK,
 		uintptr(unsafe.Pointer(&lock)),
 	)
 	if errno != 0 {

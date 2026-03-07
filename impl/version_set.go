@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 
 	"github.com/ls4154/golsm/db"
+	"github.com/ls4154/golsm/fs"
 	"github.com/ls4154/golsm/log"
 	"github.com/ls4154/golsm/table"
 	"github.com/ls4154/golsm/util"
@@ -214,7 +215,7 @@ type VersionSet struct {
 	logNumber          FileNumber
 	prevLogNumber      FileNumber
 
-	descriptorFile db.WritableFile
+	descriptorFile fs.WritableFile
 	descriptorLog  *log.Writer
 
 	dummyVersions Version
@@ -224,7 +225,7 @@ type VersionSet struct {
 
 	applyMu sync.Mutex // serialize AppendVersion and AddRecord
 
-	env db.Env
+	env fs.Env
 }
 
 type Compaction struct {
@@ -357,7 +358,7 @@ func (b *VersionBuilder) MaybeAddFile(v *Version, level Level, f *FileMetaData) 
 	v.files[level] = append(v.files[level], f)
 }
 
-func NewVersionSet(dbname string, icmp *InternalKeyComparator, env db.Env, tableCache *TableCache,
+func NewVersionSet(dbname string, icmp *InternalKeyComparator, env fs.Env, tableCache *TableCache,
 	paranoidChecks bool) *VersionSet {
 	vset := &VersionSet{
 		dbname:             dbname,
@@ -426,7 +427,7 @@ func (vs *VersionSet) LogAndApply(edit *VersionEdit, dbMu *sync.Mutex) error {
 		newManifestFile := DescriptorFileName(vs.dbname, vs.manifestFileNumber)
 		f, err := vs.env.NewWritableFile(newManifestFile)
 		if err != nil {
-			return err
+			return wrapIOError(err, "create manifest %s", newManifestFile)
 		}
 		vs.descriptorFile = f
 		vs.descriptorLog = log.NewWriter(f)
@@ -452,7 +453,7 @@ func (vs *VersionSet) LogAndApply(edit *VersionEdit, dbMu *sync.Mutex) error {
 
 	if err != nil {
 		// TODO remove new manifest file if error occurs
-		return err
+		return wrapIOError(err, "apply version edit")
 	}
 
 	vs.AppendVersion(v)
@@ -479,13 +480,16 @@ func (vs *VersionSet) writeSnapshot(log *log.Writer) error {
 	}
 
 	record := edit.Append(nil)
-	return log.AddRecord(record)
+	return wrapIOError(log.AddRecord(record), "write manifest snapshot")
 }
 
 func (vs *VersionSet) Recover() error {
 	current, err := util.ReadFile(vs.env, CurrentFileName(vs.dbname))
 	if err != nil {
-		return err
+		if fs.IsNotExist(err) {
+			return fmt.Errorf("%w: missing CURRENT file", db.ErrCorruption)
+		}
+		return wrapIOError(err, "read CURRENT file %s", CurrentFileName(vs.dbname))
 	}
 
 	if len(current) == 0 || current[len(current)-1] != '\n' {
@@ -496,10 +500,10 @@ func (vs *VersionSet) Recover() error {
 	dscname := vs.dbname + "/" + string(current)
 	file, err := vs.env.NewSequentialFile(dscname)
 	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
+		if fs.IsNotExist(err) {
 			return fmt.Errorf("%w: CURRENT points to a non-existent file", db.ErrCorruption)
 		}
-		return err
+		return wrapIOError(err, "open manifest %s", dscname)
 	}
 	defer file.Close()
 

@@ -7,11 +7,12 @@ import (
 	"io"
 
 	"github.com/ls4154/golsm/db"
+	"github.com/ls4154/golsm/fs"
 	"github.com/ls4154/golsm/util"
 )
 
 type Table struct {
-	file db.RandomAccessFile
+	file fs.RandomAccessFile
 	cmp  db.Comparator
 
 	indexBlock *Block
@@ -33,17 +34,17 @@ func (t *Table) GetCacheID() uint64 {
 	return t.cacheID
 }
 
-func OpenTable(file db.RandomAccessFile, size uint64, cmp db.Comparator, filterPolicy db.FilterPolicy,
+func OpenTable(file fs.RandomAccessFile, size uint64, cmp db.Comparator, filterPolicy db.FilterPolicy,
 	bcache *BlockCache, cacheID uint64, paranoidChecks bool,
 ) (*Table, error) {
 	// Footer
 	var buf [FooterLength]byte
 	n, err := file.ReadAt(buf[:], int64(size)-FooterLength)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: read table footer: %v", db.ErrIO, err)
 	}
 	if n < FooterLength {
-		return nil, errors.New("truncated footer read")
+		return nil, fmt.Errorf("%w: truncated footer read", db.ErrCorruption)
 	}
 	footer, _, err := DecodeFooter(buf[:])
 	if err != nil {
@@ -127,7 +128,7 @@ func (t *Table) newBlockIteratorFromIndex(indexValue []byte, verifyChecksum, byp
 	return it, nil
 }
 
-func ReadBlock(f db.RandomAccessFile, handle *BlockHandle, verifyChecksum bool) (*Block, error) {
+func ReadBlock(f fs.RandomAccessFile, handle *BlockHandle, verifyChecksum bool) (*Block, error) {
 	contents, err := readBlockContents(f, handle, verifyChecksum)
 	if err != nil {
 		return nil, err
@@ -135,11 +136,11 @@ func ReadBlock(f db.RandomAccessFile, handle *BlockHandle, verifyChecksum bool) 
 	return NewBlock(contents)
 }
 
-func readBlockContents(f db.RandomAccessFile, handle *BlockHandle, verifyChecksum bool) ([]byte, error) {
+func readBlockContents(f fs.RandomAccessFile, handle *BlockHandle, verifyChecksum bool) ([]byte, error) {
 	buf := make([]byte, handle.Size+BlockTrailerSize)
 	rd, err := f.ReadAt(buf, int64(handle.Offset))
 	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
+		return nil, fmt.Errorf("%w: read table block: %v", db.ErrIO, err)
 	}
 	if rd != int(handle.Size+BlockTrailerSize) {
 		return nil, fmt.Errorf("%w: truncated block read", db.ErrCorruption)
