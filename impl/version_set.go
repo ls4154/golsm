@@ -208,6 +208,7 @@ type VersionSet struct {
 	tableCache     *TableCache
 	icmp           *InternalKeyComparator
 	paranoidChecks bool
+	compaction     *compactionPolicy
 
 	nextFileNumber     FileNumber
 	manifestFileNumber FileNumber
@@ -359,12 +360,15 @@ func (b *VersionBuilder) MaybeAddFile(v *Version, level Level, f *FileMetaData) 
 }
 
 func NewVersionSet(dbname string, icmp *InternalKeyComparator, env fs.Env, tableCache *TableCache,
-	paranoidChecks bool) *VersionSet {
+	paranoidChecks bool, compaction *compactionPolicy) *VersionSet {
+	util.Assert(compaction != nil)
+
 	vset := &VersionSet{
 		dbname:             dbname,
 		tableCache:         tableCache,
 		icmp:               icmp,
 		paranoidChecks:     paranoidChecks,
+		compaction:         compaction,
 		nextFileNumber:     2,
 		manifestFileNumber: 0,
 		logNumber:          0,
@@ -653,10 +657,10 @@ func (vs *VersionSet) Finalize(v *Version) {
 	for level := Level(0); level < NumLevels-1; level++ {
 		score := float64(0)
 		if level == 0 {
-			score = float64(len(v.files[level])) / L0CompactionTrigger
+			score = float64(len(v.files[level])) / float64(vs.compaction.l0CompactionTrigger)
 		} else {
 			levelBytes := totalFileSize(v.files[level])
-			score = float64(levelBytes) / maxBytesForlevel(level)
+			score = float64(levelBytes) / float64(vs.compaction.maxBytesForLevel(level))
 		}
 
 		if score > bestScore {
@@ -830,15 +834,6 @@ func totalFileSize(files []*FileMetaData) uint64 {
 		size += f.size
 	}
 	return size
-}
-
-func maxBytesForlevel(level Level) float64 {
-	result := 10 * 1048576.0 // 10MB
-	for level > 1 {
-		result *= 10
-		level--
-	}
-	return result
 }
 
 func getRange(icmp *InternalKeyComparator, files []*FileMetaData) ([]byte, []byte) {

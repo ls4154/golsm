@@ -208,7 +208,7 @@ func (d *dbImpl) makeRoomForWrite(force bool) error {
 			return errDBClosed
 		} else if bgErr := d.GetBackgroundError(); bgErr != nil {
 			return bgErr
-		} else if allowDelay && d.versions.NumLevelFiles(0) >= L0SlowDownTrigger {
+		} else if allowDelay && d.versions.NumLevelFiles(0) >= d.versions.compaction.l0SlowdownTrigger {
 			d.mu.Unlock()
 			time.Sleep(time.Millisecond)
 			allowDelay = false // sleep only once
@@ -221,7 +221,7 @@ func (d *dbImpl) makeRoomForWrite(force bool) error {
 			d.mu.Unlock()
 			d.bgWork.writerWaitForFlushDone()
 			d.mu.Lock()
-		} else if d.versions.NumLevelFiles(0) >= L0StopWritesTrigger {
+		} else if d.versions.NumLevelFiles(0) >= d.versions.compaction.l0StopWritesTrigger {
 			d.logger.Printf("Too many L0 files; waiting...")
 			d.mu.Unlock()
 			d.bgWork.writerWaitForCompactionDone()

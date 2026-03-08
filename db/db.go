@@ -97,6 +97,15 @@ type Logger interface {
 	Printf(format string, v ...any)
 }
 
+const (
+	defaultBlockSize            = 4 * 1024
+	defaultBlockRestartInterval = 16
+	defaultMaxFileSize          = 4 * 1024 * 1024
+	defaultWriteBufferSize      = 4 * 1024 * 1024
+	defaultMaxOpenFiles         = 1000
+	defaultBlockCacheSize       = 64 * 1024 * 1024
+)
+
 type Options struct {
 	// CreateIfMissing creates the DB on Open when it does not exist.
 	CreateIfMissing bool
@@ -134,20 +143,58 @@ type Options struct {
 	// If nil, Open uses a default logger backed by "<dbname>/info_log",
 	// rotated at 10 MB.
 	Logger Logger
+	// Compaction controls L0 backpressure thresholds and per-level size targets.
+	// If nil, Open uses DefaultCompactionOptions for the current WriteBufferSize.
+	Compaction *CompactionOptions
 }
 
 func DefaultOptions() *Options {
 	return &Options{
 		CreateIfMissing:      true,
 		ErrorIfExists:        false,
-		BlockSize:            4 * 1024,
-		BlockRestartInterval: 16,
-		MaxFileSize:          4 * 1024 * 1024,
-		WriteBufferSize:      4 * 1024 * 1024,
-		MaxOpenFiles:         1000,
-		BlockCacheSize:       64 << 20,
+		BlockSize:            defaultBlockSize,
+		BlockRestartInterval: defaultBlockRestartInterval,
+		MaxFileSize:          defaultMaxFileSize,
+		WriteBufferSize:      defaultWriteBufferSize,
+		MaxOpenFiles:         defaultMaxOpenFiles,
+		BlockCacheSize:       defaultBlockCacheSize,
 		Compression:          SnappyCompression,
 	}
+}
+
+func DefaultCompactionOptions(writeBufferSize int) *CompactionOptions {
+	if writeBufferSize <= 0 {
+		writeBufferSize = defaultWriteBufferSize
+	}
+
+	opt := &CompactionOptions{
+		L0CompactionTrigger:  4,
+		L0SlowdownTrigger:    8,
+		L0StopWritesTrigger:  12,
+		LevelBytesMultiplier: 10,
+	}
+
+	// roughly one full L0+L1 compaction's output
+	opt.LevelBytesBase = 2 * uint64(opt.L0CompactionTrigger) * uint64(writeBufferSize)
+	return opt
+}
+
+// CompactionOptions controls L0 backpressure thresholds and per-level size targets.
+type CompactionOptions struct {
+	// L0CompactionTrigger starts L0 compaction when the number of level-0 files reaches this threshold.
+	L0CompactionTrigger int
+	// L0SlowdownTrigger starts brief writer delays when the number of level-0 files reaches this threshold.
+	// It must be >= L0CompactionTrigger.
+	L0SlowdownTrigger int
+	// L0StopWritesTrigger blocks writers until compaction makes progress when the number of level-0 files reaches this threshold.
+	// It must be >= L0SlowdownTrigger.
+	L0StopWritesTrigger int
+	// LevelBytesBase is the target total size in bytes for level-1.
+	// It is usually better to size this proportionally to WriteBufferSize.
+	LevelBytesBase uint64
+	// LevelBytesMultiplier multiplies the target size for each subsequent level.
+	// For example, with base=10 MiB and multiplier=10, level-2 targets 100 MiB.
+	LevelBytesMultiplier int
 }
 
 // ReadOptions is optional; passing nil uses default read behavior.

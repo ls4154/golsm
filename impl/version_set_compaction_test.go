@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/ls4154/golsm/db"
 	"github.com/ls4154/golsm/util"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +29,15 @@ func testFile(level Level, number FileNumber, size uint64, smallest, largest str
 }
 
 func testVersionSetForCompaction() *VersionSet {
-	return NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, nil, nil, false)
+	return testVersionSetForCompactionWithPolicy(nil)
+}
+
+func testVersionSetForCompactionWithPolicy(opt *db.CompactionOptions) *VersionSet {
+	validated, err := validateCompactionOptions(opt, db.DefaultOptions().WriteBufferSize)
+	if err != nil {
+		panic(err)
+	}
+	return NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, nil, nil, false, newCompactionPolicy(validated))
 }
 
 func TestVersionSetNeedsCompactionL0Trigger(t *testing.T) {
@@ -52,8 +61,9 @@ func TestVersionSetNeedsCompactionL0Trigger(t *testing.T) {
 func TestVersionSetNeedsCompactionBySize(t *testing.T) {
 	vs := testVersionSetForCompaction()
 	v := vs.NewVersion()
+	l1Limit := vs.compaction.maxBytesForLevel(1)
 	v.files[1] = []*FileMetaData{
-		testFile(1, 1, 11*1024*1024, "a", "z"),
+		testFile(1, 1, l1Limit+1, "a", "z"),
 	}
 
 	vs.Finalize(v)
@@ -62,6 +72,41 @@ func TestVersionSetNeedsCompactionBySize(t *testing.T) {
 	require.Equal(t, Level(1), v.compactionLevel)
 	require.Greater(t, v.compactionScore, float64(1))
 	require.True(t, vs.NeedsCompaction())
+}
+
+func TestVersionSetNeedsCompactionUsesConfiguredL0Trigger(t *testing.T) {
+	vs := testVersionSetForCompactionWithPolicy(&db.CompactionOptions{
+		L0CompactionTrigger: 2,
+	})
+	v := vs.NewVersion()
+	v.files[0] = []*FileMetaData{
+		testFile(0, 1, 1, "a", "a"),
+		testFile(0, 2, 1, "b", "b"),
+	}
+
+	vs.Finalize(v)
+	vs.AppendVersion(v)
+
+	require.Equal(t, Level(0), v.compactionLevel)
+	require.Equal(t, float64(1), v.compactionScore)
+	require.True(t, vs.NeedsCompaction())
+}
+
+func TestVersionSetNeedsCompactionUsesConfiguredLevelBytes(t *testing.T) {
+	vs := testVersionSetForCompactionWithPolicy(&db.CompactionOptions{
+		LevelBytesBase: 20 << 20,
+	})
+	v := vs.NewVersion()
+	v.files[1] = []*FileMetaData{
+		testFile(1, 1, 15*1024*1024, "a", "z"),
+	}
+
+	vs.Finalize(v)
+	vs.AppendVersion(v)
+
+	require.Equal(t, Level(1), v.compactionLevel)
+	require.Less(t, v.compactionScore, float64(1))
+	require.False(t, vs.NeedsCompaction())
 }
 
 func TestVersionSetPickCompactionL0(t *testing.T) {
@@ -293,20 +338,23 @@ func TestFinalizePicksHighestScoreLevel(t *testing.T) {
 	vs := testVersionSetForCompaction()
 	v := vs.NewVersion()
 
+	l1Limit := vs.compaction.maxBytesForLevel(1)
+	l2Limit := vs.compaction.maxBytesForLevel(2)
+
 	// L0: 2 files → score = 2/4 = 0.5
 	v.files[0] = []*FileMetaData{
 		testFile(0, 1, 1, "a", "b"),
 		testFile(0, 2, 1, "c", "d"),
 	}
 
-	// L1: 15MB → score = 15/10 = 1.5
+	// L1: 1.5x limit
 	v.files[1] = []*FileMetaData{
-		testFile(1, 10, 15*1024*1024, "a", "z"),
+		testFile(1, 10, (l1Limit*3)/2, "a", "z"),
 	}
 
-	// L2: 50MB → score = 50/100 = 0.5
+	// L2: 0.5x limit
 	v.files[2] = []*FileMetaData{
-		testFile(2, 20, 50*1024*1024, "a", "z"),
+		testFile(2, 20, l2Limit/2, "a", "z"),
 	}
 
 	vs.Finalize(v)

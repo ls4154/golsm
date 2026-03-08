@@ -7,12 +7,7 @@ import (
 	"github.com/ls4154/golsm/util"
 )
 
-const (
-	NumLevels           = 7
-	L0CompactionTrigger = 4
-	L0SlowDownTrigger   = 8
-	L0StopWritesTrigger = 12
-)
+const NumLevels = 7
 
 type ValueType byte
 
