@@ -31,13 +31,12 @@ type dbImpl struct {
 	// current active memtable
 	mem *MemTable
 	// immutable memtable being flushed to level-0
-	imm         *MemTable
-	mu          sync.Mutex
-	env         fs.Env
-	log         *log.Writer
-	logfile     fs.WritableFile
-	logfileNum  FileNumber
-	infoLogFile fs.WritableFile
+	imm        *MemTable
+	mu         sync.Mutex
+	env        fs.Env
+	log        *log.Writer
+	logfile    fs.WritableFile
+	logfileNum FileNumber
 
 	writeSerializer *writeSerializer
 	bgWork          *bgWork
@@ -47,7 +46,8 @@ type dbImpl struct {
 	closed bool
 	bgErr  error
 
-	logger db.Logger
+	logger       db.Logger
+	loggerCloser io.Closer
 
 	compactionStats [NumLevels]CompactionStats
 }
@@ -65,7 +65,7 @@ func Open(userOpt *db.Options, dbname string) (db.DB, error) {
 	env := fs.Default()
 	_ = env.CreateDir(dbname)
 
-	logger, infoLogFile, err := openInfoLogger(env, dbname, opt.Logger)
+	logger, loggerCloser, err := openInfoLogger(env, dbname, opt.Logger)
 	if err != nil {
 		return nil, err
 	}
@@ -90,8 +90,8 @@ func Open(userOpt *db.Options, dbname string) (db.DB, error) {
 		mem:            nil,
 		env:            env,
 
-		logger:      logger,
-		infoLogFile: infoLogFile,
+		logger:       logger,
+		loggerCloser: loggerCloser,
 	}
 
 	db.writeSerializer = db.newWriteSerializer()
@@ -538,13 +538,12 @@ func (d *dbImpl) Close() error {
 		_ = d.logfile.Close()
 	}
 
-	if d.infoLogFile != nil {
-		_ = d.infoLogFile.Flush()
-		_ = d.infoLogFile.Close()
-	}
-
 	d.tableCache.Close()
 	d.versions.Close()
+
+	if d.loggerCloser != nil {
+		_ = d.loggerCloser.Close()
+	}
 
 	if d.fileLock != nil {
 		_ = d.env.UnlockFile(d.fileLock)

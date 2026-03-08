@@ -1,6 +1,7 @@
 package impl
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -23,7 +24,7 @@ func TestOpenInfoLoggerFlushesEachWrite(t *testing.T) {
 
 	logger.Printf("flush-test")
 
-	data, err := util.ReadFile(env, InfoLogFileName(dbname))
+	data, err := util.ReadFile(env, filepath.Join(dbname, util.DefaultLogFileName))
 	require.NoError(t, err)
 	require.True(t, strings.Contains(string(data), "flush-test"))
 }

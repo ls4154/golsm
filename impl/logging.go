@@ -2,41 +2,24 @@ package impl
 
 import (
 	"io"
-	stdlog "log"
 
 	"github.com/ls4154/golsm/db"
 	"github.com/ls4154/golsm/fs"
+	"github.com/ls4154/golsm/util"
 )
 
-type flushOnWrite struct {
-	f fs.WritableFile
-}
+func openInfoLogger(env fs.Env, dbname string, userLogger db.Logger) (db.Logger, io.Closer, error) {
+	if userLogger != nil {
+		return userLogger, nil, nil
+	}
 
-func (w *flushOnWrite) Write(p []byte) (int, error) {
-	n, err := w.f.Write(p)
+	const defaultInfoLogSize = 10 << 20
+	logger, err := util.OpenFileLoggerDir(env, dbname, defaultInfoLogSize)
 	if err != nil {
-		return n, err
-	}
-	if n != len(p) {
-		return n, io.ErrShortWrite
-	}
-	if err := w.f.Flush(); err != nil {
-		return n, err
-	}
-	return n, nil
-}
-
-func openInfoLogger(env fs.Env, dbname string, logger db.Logger) (db.Logger, fs.WritableFile, error) {
-	if logger != nil {
-		return logger, nil, nil
+		return nil, nil, err
 	}
 
-	f, err := env.NewAppendableFile(InfoLogFileName(dbname))
-	if err != nil {
-		return nil, nil, wrapIOError(err, "open info log %s", InfoLogFileName(dbname))
-	}
-
-	return stdlog.New(&flushOnWrite{f: f}, "", stdlog.LstdFlags|stdlog.Lmicroseconds), f, nil
+	return logger, logger, nil
 }
 
 func statusForLog(err error) string {

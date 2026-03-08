@@ -109,7 +109,8 @@ type Options struct {
 	// Changing its Name() breaks format compatibility; changing its ordering corrupts data.
 	Comparator Comparator
 	// Logger is the sink used for internal log output.
-	// If nil, Open uses a default logger backed by "<dbname>/LOG".
+	// If nil, Open uses a default logger backed by "<dbname>/info_log",
+	// rotated at 10 MB.
 	Logger Logger
 }
 
