@@ -38,6 +38,11 @@ type DB interface {
 	Close() error
 }
 
+type WriteBatch interface {
+	Put(key, value []byte)
+	Delete(key []byte)
+}
+
 type Iterator interface {
 	// Valid reports whether the iterator is positioned at a valid entry.
 	Valid() bool
@@ -74,6 +79,23 @@ const (
 	NoCompression CompressionType = iota
 	SnappyCompression
 )
+
+type Comparator interface {
+	Compare(a, b []byte) int
+	Name() string
+	FindShortestSeparator(start *[]byte, limit []byte)
+	FindShortSuccessor(key *[]byte)
+}
+
+type FilterPolicy interface {
+	Name() string
+	AppendFilter(keys [][]byte, dst []byte) []byte
+	MightContain(key, filter []byte) bool
+}
+
+type Logger interface {
+	Printf(format string, v ...any)
+}
 
 type Options struct {
 	// CreateIfMissing creates the DB on Open when it does not exist.
