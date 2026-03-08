@@ -14,7 +14,8 @@ func openInfoLogger(env fs.Env, dbname string, userLogger db.Logger) (db.Logger,
 	}
 
 	const defaultInfoLogSize = 10 << 20
-	logger, err := util.OpenFileLoggerDir(env, dbname, defaultInfoLogSize)
+	const defaultInfoLogFiles = 5
+	logger, err := util.OpenFileLoggerDir(env, dbname, defaultInfoLogSize, defaultInfoLogFiles)
 	if err != nil {
 		return nil, nil, err
 	}

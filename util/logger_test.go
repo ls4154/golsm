@@ -13,7 +13,7 @@ func TestFileLoggerOpenFlushesEachWrite(t *testing.T) {
 	env := fs.Default()
 	dirname := t.TempDir()
 
-	logger, err := OpenFileLoggerDir(env, dirname, 0)
+	logger, err := OpenFileLoggerDir(env, dirname, 0, 0)
 	require.NoError(t, err)
 	require.NotNil(t, logger)
 	defer func() {
@@ -27,11 +27,40 @@ func TestFileLoggerOpenFlushesEachWrite(t *testing.T) {
 	require.Contains(t, string(data), "flush-test")
 }
 
+func TestFileLoggerPrunesOldArchives(t *testing.T) {
+	env := fs.Default()
+	dirname := t.TempDir()
+
+	// maxFiles=1: only one archive kept at a time
+	logger, err := OpenFileLoggerDir(env, dirname, 64, 1)
+	require.NoError(t, err)
+	defer func() {
+		_ = logger.Close()
+	}()
+
+	// Three rotations: first archive should be deleted after second rotation
+	logger.Printf(strings.Repeat("a", 48))
+	logger.Printf(strings.Repeat("b", 48))
+	logger.Printf(strings.Repeat("c", 48))
+
+	children, err := env.GetChildren(dirname)
+	require.NoError(t, err)
+
+	var archives []string
+	for _, name := range children {
+		if strings.HasPrefix(name, "info_log.") {
+			archives = append(archives, name)
+		}
+	}
+
+	require.Len(t, archives, 1)
+}
+
 func TestFileLoggerRotateBySize(t *testing.T) {
 	env := fs.Default()
 	dirname := t.TempDir()
 
-	logger, err := OpenFileLoggerDir(env, dirname, 64)
+	logger, err := OpenFileLoggerDir(env, dirname, 64, 0)
 	require.NoError(t, err)
 	defer func() {
 		_ = logger.Close()

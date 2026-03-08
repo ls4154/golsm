@@ -4,7 +4,9 @@ import (
 	"io"
 	stdlog "log"
 	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,8 +23,10 @@ type FileLogger struct {
 type rotatingFile struct {
 	mu         sync.Mutex
 	env        fs.Env
+	dir        string
 	activePath string
 	maxSize    uint64
+	maxFiles   int
 	file       fs.WritableFile
 	size       uint64
 }
@@ -30,9 +34,10 @@ type rotatingFile struct {
 // OpenFileLogger opens a file-based logger that writes to filename.
 // If maxSize > 0, the log file is rotated when it exceeds maxSize bytes;
 // the old file is renamed with a timestamp suffix and a new file is created.
+// If maxFiles > 0, old rotated files beyond that count are deleted after each rotation.
 // Each write is flushed immediately to ensure durability.
-func OpenFileLogger(env fs.Env, filename string, maxSize uint64) (*FileLogger, error) {
-	f, err := openRotatingFile(env, filename, maxSize)
+func OpenFileLogger(env fs.Env, filename string, maxSize uint64, maxFiles int) (*FileLogger, error) {
+	f, err := openRotatingFile(env, filename, maxSize, maxFiles)
 	if err != nil {
 		return nil, err
 	}
@@ -44,8 +49,8 @@ func OpenFileLogger(env fs.Env, filename string, maxSize uint64) (*FileLogger, e
 
 // OpenFileLoggerDir opens a file-based logger in dirname using the default
 // log file name (DefaultLogFileName).
-func OpenFileLoggerDir(env fs.Env, dirname string, maxSize uint64) (*FileLogger, error) {
-	return OpenFileLogger(env, filepath.Join(dirname, DefaultLogFileName), maxSize)
+func OpenFileLoggerDir(env fs.Env, dirname string, maxSize uint64, maxFiles int) (*FileLogger, error) {
+	return OpenFileLogger(env, filepath.Join(dirname, DefaultLogFileName), maxSize, maxFiles)
 }
 
 func (l *FileLogger) Printf(format string, v ...any) {
@@ -56,7 +61,7 @@ func (l *FileLogger) Close() error {
 	return l.file.Close()
 }
 
-func openRotatingFile(env fs.Env, filename string, maxSize uint64) (*rotatingFile, error) {
+func openRotatingFile(env fs.Env, filename string, maxSize uint64, maxFiles int) (*rotatingFile, error) {
 	size, err := env.GetFileSize(filename)
 	if err != nil {
 		if !fs.IsNotExist(err) {
@@ -70,13 +75,17 @@ func openRotatingFile(env fs.Env, filename string, maxSize uint64) (*rotatingFil
 		return nil, WrapIOError(err, "open info log %s", filename)
 	}
 
-	return &rotatingFile{
+	f := &rotatingFile{
 		env:        env,
+		dir:        filepath.Dir(filename),
 		activePath: filename,
 		maxSize:    maxSize,
+		maxFiles:   maxFiles,
 		file:       file,
 		size:       size,
-	}, nil
+	}
+	f.pruneArchives()
+	return f, nil
 }
 
 func (f *rotatingFile) Write(p []byte) (int, error) {
@@ -138,7 +147,37 @@ func (f *rotatingFile) rotate() error {
 	}
 	f.file = file
 	f.size = 0
+
+	f.pruneArchives()
 	return nil
+}
+
+func (f *rotatingFile) pruneArchives() {
+	if f.maxFiles <= 0 {
+		return
+	}
+
+	children, err := f.env.GetChildren(f.dir)
+	if err != nil {
+		return
+	}
+
+	base := filepath.Base(f.activePath) + "."
+	var archives []string
+	for _, name := range children {
+		if strings.HasPrefix(name, base) {
+			archives = append(archives, name)
+		}
+	}
+
+	sort.Strings(archives)
+
+	if len(archives) <= f.maxFiles {
+		return
+	}
+	for _, name := range archives[:len(archives)-f.maxFiles] {
+		_ = f.env.RemoveFile(filepath.Join(f.dir, name))
+	}
 }
 
 func (f *rotatingFile) nextArchivePath() string {

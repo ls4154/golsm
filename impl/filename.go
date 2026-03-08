@@ -16,7 +16,7 @@ const (
 	FileTypeDescriptor
 	FileTypeCurrent
 	FileTypeTemp
-	FileTypeInfoLog
+	FileTypeInfoLog // legacy "LOG" / "LOG.old"
 )
 
 func CurrentFileName(dbname string) string {
@@ -45,10 +45,6 @@ func DescriptorFileName(dbname string, num FileNumber) string {
 
 func LockFileName(dbname string) string {
 	return filepath.Join(dbname, "LOCK")
-}
-
-func InfoLogFileName(dbname string) string {
-	return filepath.Join(dbname, "LOG")
 }
 
 func ParseFileName(filename string) (FileType, FileNumber, bool) {
