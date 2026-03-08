@@ -450,6 +450,10 @@ func (d *dbImpl) Delete(key []byte, opt *db.WriteOptions) error {
 	return d.Write(batch, opt)
 }
 
+func (d *dbImpl) NewWriteBatch() db.WriteBatch {
+	return NewWriteBatch()
+}
+
 func (d *dbImpl) Write(updates db.WriteBatch, opt *db.WriteOptions) error {
 	if updates == nil {
 		return nil

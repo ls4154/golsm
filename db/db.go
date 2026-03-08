@@ -17,6 +17,8 @@ type DB interface {
 	// It is not an error if the key does not exist.
 	// options may be nil.
 	Delete(key []byte, options *WriteOptions) error
+	// NewWriteBatch creates a batch instance accepted by Write.
+	NewWriteBatch() WriteBatch
 	// Write applies batch atomically.
 	// options may be nil.
 	Write(batch WriteBatch, options *WriteOptions) error
