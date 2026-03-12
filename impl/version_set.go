@@ -210,6 +210,7 @@ type VersionSet struct {
 	paranoidChecks      bool
 	compaction          *compactionPolicy
 	maxManifestFileSize uint64
+	logger              db.Logger
 
 	nextFileNumber            FileNumber
 	manifestFileNumber        FileNumber
@@ -362,7 +363,7 @@ func (b *VersionBuilder) MaybeAddFile(v *Version, level Level, f *FileMetaData) 
 }
 
 func NewVersionSet(dbname string, icmp *InternalKeyComparator, env fs.Env, tableCache *TableCache,
-	paranoidChecks bool, maxManifestFileSize uint64, compaction *compactionPolicy) *VersionSet {
+	paranoidChecks bool, maxManifestFileSize uint64, logger db.Logger, compaction *compactionPolicy) *VersionSet {
 	util.Assert(compaction != nil)
 
 	vset := &VersionSet{
@@ -375,6 +376,7 @@ func NewVersionSet(dbname string, icmp *InternalKeyComparator, env fs.Env, table
 		manifestFileNumber:  0,
 		logNumber:           0,
 		maxManifestFileSize: maxManifestFileSize,
+		logger:              logger,
 
 		descriptorFile: nil,
 		descriptorLog:  nil,
@@ -426,6 +428,8 @@ func (vs *VersionSet) LogAndApply(edit *VersionEdit, dbMu *sync.Mutex) error {
 
 	newManifest := false
 	var newManifestNumber FileNumber
+	var oldManifestNumber FileNumber
+	var oldManifestSize uint64
 	var snapshotEdit VersionEdit
 	writeDescriptorLog := vs.descriptorLog
 	writeDescriptorFile := vs.descriptorFile
@@ -439,6 +443,8 @@ func (vs *VersionSet) LogAndApply(edit *VersionEdit, dbMu *sync.Mutex) error {
 	} else if vs.maxManifestFileSize > 0 && vs.descriptorLog.Size() >= vs.maxManifestFileSize {
 		newManifest = true
 		newManifestNumber = vs.NewFileNumber()
+		oldManifestNumber = vs.manifestFileNumber
+		oldManifestSize = vs.descriptorLog.Size()
 		oldDescriptorFile = vs.descriptorFile
 	}
 
@@ -499,6 +505,10 @@ func (vs *VersionSet) LogAndApply(edit *VersionEdit, dbMu *sync.Mutex) error {
 	}
 
 	if err == nil && oldDescriptorFile != nil {
+		if vs.logger != nil {
+			vs.logger.Printf("Rotated MANIFEST #%d -> #%d at %d bytes",
+				oldManifestNumber, newManifestNumber, oldManifestSize)
+		}
 		_ = oldDescriptorFile.Close()
 	}
 

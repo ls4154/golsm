@@ -146,7 +146,7 @@ func TestLogAndApplyRotationFailureKeepsOldManifestOpen(t *testing.T) {
 		renameErr: errors.New("rename failed"),
 	}
 
-	vs := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false, 1,
+	vs := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false, 1, nil,
 		newCompactionPolicy(db.DefaultCompactionOptions(0)))
 
 	oldFile := &trackedWritableFile{}

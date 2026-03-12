@@ -75,7 +75,7 @@ func Open(userOpt *db.Options, dbname string) (db.DB, error) {
 		bcache = table.NewBlockCache(opt.BlockCacheSize)
 	}
 	tcache := NewTableCache(dbname, env, opt.MaxOpenFiles, icmp, ifilter, bcache, opt.ParanoidChecks)
-	vset := NewVersionSet(dbname, icmp, env, tcache, opt.ParanoidChecks, opt.MaxManifestFileSize, newCompactionPolicy(opt.Compaction))
+	vset := NewVersionSet(dbname, icmp, env, tcache, opt.ParanoidChecks, opt.MaxManifestFileSize, logger, newCompactionPolicy(opt.Compaction))
 	snapshots := NewSnapshotList()
 
 	db := &dbImpl{
@@ -354,8 +354,9 @@ func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit, fnum FileNum
 	err := BuildTable(d.dbname, d.env, iter, d.icmp, d.options, d.ifilter, &meta)
 	d.mu.Lock()
 
-	d.logger.Printf("Level-0 table #%d: %d bytes %s", meta.number, meta.size, statusForLog(err))
-	d.addCompactionStats(0, time.Since(startTime), 0, meta.size)
+	elapsed := time.Since(startTime)
+	d.logger.Printf("Level-0 table #%d: %d bytes %s in %s", meta.number, meta.size, statusForLog(err), elapsed)
+	d.addCompactionStats(0, elapsed, 0, meta.size)
 
 	if err != nil {
 		return err
@@ -370,9 +371,6 @@ func (d *dbImpl) WriteLevel0Table(mem *MemTable, edit *VersionEdit, fnum FileNum
 	// TODO pick level
 
 	edit.AddFile(level, meta.number, meta.size, meta.smallest, meta.largest)
-
-	elapsed := time.Now().Sub(startTime)
-	d.logger.Printf("flush time: %s", elapsed)
 
 	return nil
 }

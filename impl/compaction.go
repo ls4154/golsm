@@ -148,8 +148,7 @@ func (d *dbImpl) doCompactionWork(c *Compaction) error {
 
 	d.mu.Lock()
 
-	elapsed := time.Now().Sub(startTime)
-	d.logger.Printf("compaction time: %s", elapsed)
+	elapsed := time.Since(startTime)
 	var bytesRead uint64
 	for i := range 2 {
 		bytesRead += totalFileSize(c.inputs[i])
@@ -164,6 +163,9 @@ func (d *dbImpl) doCompactionWork(c *Compaction) error {
 	if err != nil {
 		d.RecordBackgroundError(err)
 	}
+
+	d.logger.Printf("Compacted %d@%d + %d@%d files => %d bytes %s in %s",
+		len(c.inputs[0]), c.level, len(c.inputs[1]), c.level+1, bytesWritten, statusForLog(err), elapsed)
 
 	d.CleaunupCompaction(builder, curOutfile, outputs)
 
@@ -221,9 +223,6 @@ func (d *dbImpl) FinishCompactionOutputFile(out *FileMetaData, outfile fs.Writab
 
 func (d *dbImpl) ApplyCompaction(c *Compaction, outputs []*FileMetaData, totalOutputBytes uint64) error {
 	util.AssertMutexHeld(&d.mu)
-
-	d.logger.Printf("Compacted %d@%d + %d@%d files => %d bytes",
-		len(c.inputs[0]), c.level, len(c.inputs[1]), c.level+1, totalOutputBytes)
 
 	// delete input files
 	for i := range 2 {
