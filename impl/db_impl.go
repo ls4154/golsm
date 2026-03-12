@@ -156,7 +156,7 @@ func (d *dbImpl) recover(edit *VersionEdit) error {
 		}
 
 		d.logger.Printf("Creating DB %s", d.dbname)
-		err := d.newDB()
+		err := d.initManifest()
 		if err != nil {
 			return err
 		}
@@ -294,7 +294,7 @@ func (d *dbImpl) RecoverLogFile(logNum FileNumber, last bool, edit *VersionEdit,
 	return nil
 }
 
-func (d *dbImpl) newDB() error {
+func (d *dbImpl) initManifest() error {
 	edit := VersionEdit{}
 	edit.SetComparator(d.icmp.userCmp.Name())
 	edit.SetLogNumber(0)

@@ -424,34 +424,41 @@ func (vs *VersionSet) LogAndApply(edit *VersionEdit, dbMu *sync.Mutex) error {
 	builder.SaveTo(v)
 	vs.Finalize(v)
 
-	setCurrent := false
-	createNewManifest := false
-	newManifestNumber := vs.manifestFileNumber
-	var newDescriptorFile fs.WritableFile
-	var newDescriptorLog *log.Writer
-	oldDescriptorFile := vs.descriptorFile
+	newManifest := false
+	var newManifestNumber FileNumber
+	var snapshotEdit VersionEdit
+	writeDescriptorLog := vs.descriptorLog
+	writeDescriptorFile := vs.descriptorFile
+	var oldDescriptorFile fs.WritableFile
 
-	if vs.descriptorLog == nil {
-		createNewManifest = true
-		setCurrent = true
-	} else if vs.maxManifestFileSize > 0 {
-		if vs.descriptorLog.Size() >= vs.maxManifestFileSize {
-			createNewManifest = true
-			setCurrent = true
-			newManifestNumber = vs.NewFileNumber()
-		}
+	if writeDescriptorLog == nil {
+		util.Assert(vs.manifestFileNumber > 0)
+		util.Assert(vs.descriptorFile == nil)
+		newManifest = true
+		newManifestNumber = vs.manifestFileNumber
+	} else if vs.maxManifestFileSize > 0 && vs.descriptorLog.Size() >= vs.maxManifestFileSize {
+		newManifest = true
+		newManifestNumber = vs.NewFileNumber()
+		oldDescriptorFile = vs.descriptorFile
 	}
 
-	if createNewManifest {
-		vs.pendingManifestFileNumber = newManifestNumber
-		newManifestFile := DescriptorFileName(vs.dbname, newManifestNumber)
-		f, err := vs.env.NewWritableFile(newManifestFile)
-		if err != nil {
-			vs.pendingManifestFileNumber = 0
-			return wrapIOError(err, "create manifest %s", newManifestFile)
+	if newManifest {
+		// Capture the snapshot under dbMu. The actual MANIFEST I/O runs after
+		// releasing dbMu, so shared version state must not be read after this.
+		// build snapshot
+		snapshotEdit.SetComparator(vs.icmp.userCmp.Name())
+		for lv, cp := range vs.compactPointer {
+			if len(cp) > 0 {
+				snapshotEdit.SetCompactPointer(Level(lv), cp)
+			}
 		}
-		newDescriptorFile = f
-		newDescriptorLog = log.NewWriter(f)
+		for lv, files := range vs.current.files {
+			for _, f := range files {
+				snapshotEdit.AddFile(Level(lv), f.number, f.size, f.smallest, f.largest)
+			}
+		}
+
+		vs.pendingManifestFileNumber = newManifestNumber
 	}
 
 	edit.SetNextFileNumber(vs.nextFileNumber)
@@ -459,52 +466,60 @@ func (vs *VersionSet) LogAndApply(edit *VersionEdit, dbMu *sync.Mutex) error {
 
 	dbMu.Unlock()
 
-	record := edit.Append(nil)
+	newManifestName := DescriptorFileName(vs.dbname, newManifestNumber)
+
 	var err error
-	if createNewManifest {
-		// FIXME: writeSnapshot currently reads vs.compactPointer / vs.current directly
-		// after dbMu is unlocked. PickCompaction mutates compactPointer under dbMu
-		// without applyMu, so this read path should use a copy captured under dbMu
-		// to avoid unsynchronized read/write on shared state.
-		err = vs.writeSnapshot(newDescriptorLog)
-	}
-	if err == nil {
-		if createNewManifest {
-			err = newDescriptorLog.AddRecord(record)
-		} else {
-			err = vs.descriptorLog.AddRecord(record)
+	if newManifest {
+		// open new manifest
+		writeDescriptorFile, err = vs.env.NewWritableFile(newManifestName)
+		if err != nil {
+			err = wrapIOError(err, "create manifest %s", newManifestName)
+		}
+
+		if err == nil {
+			writeDescriptorLog = log.NewWriter(writeDescriptorFile)
+
+			// write snapshot
+			record := snapshotEdit.Append(nil)
+			err = writeDescriptorLog.AddRecord(record)
 		}
 	}
+
 	if err == nil {
-		if createNewManifest {
-			err = newDescriptorFile.Sync()
-		} else {
-			err = vs.descriptorFile.Sync()
-		}
+		record := edit.Append(nil)
+		err = writeDescriptorLog.AddRecord(record)
 	}
-	if err == nil && setCurrent {
+
+	if err == nil {
+		err = writeDescriptorFile.Sync()
+	}
+
+	if err == nil && newManifest {
 		err = SetCurrentFile(vs.env, vs.dbname, newManifestNumber)
+	}
+
+	if err == nil && oldDescriptorFile != nil {
+		_ = oldDescriptorFile.Close()
 	}
 
 	dbMu.Lock()
 
 	if err != nil {
-		if createNewManifest {
+		if newManifest {
 			vs.pendingManifestFileNumber = 0
-			_ = newDescriptorFile.Close()
-			_ = vs.env.RemoveFile(DescriptorFileName(vs.dbname, newManifestNumber))
+			if writeDescriptorFile != nil {
+				_ = writeDescriptorFile.Close()
+			}
+			_ = vs.env.RemoveFile(newManifestName)
 		}
 		return wrapIOError(err, "apply version edit")
 	}
 
-	if createNewManifest {
+	if newManifest {
 		vs.pendingManifestFileNumber = 0
 		vs.manifestFileNumber = newManifestNumber
-		vs.descriptorFile = newDescriptorFile
-		vs.descriptorLog = newDescriptorLog
-		if oldDescriptorFile != nil {
-			_ = oldDescriptorFile.Close()
-		}
+		vs.descriptorFile = writeDescriptorFile
+		vs.descriptorLog = writeDescriptorLog
 	}
 
 	vs.AppendVersion(v)
@@ -512,26 +527,6 @@ func (vs *VersionSet) LogAndApply(edit *VersionEdit, dbMu *sync.Mutex) error {
 	vs.prevLogNumber = edit.prevLogNumber
 
 	return nil
-}
-
-func (vs *VersionSet) writeSnapshot(log *log.Writer) error {
-	edit := VersionEdit{}
-	edit.SetComparator(vs.icmp.userCmp.Name())
-
-	for lv, cp := range vs.compactPointer {
-		if len(cp) > 0 {
-			edit.SetCompactPointer(Level(lv), cp)
-		}
-	}
-
-	for lv, files := range vs.current.files {
-		for _, f := range files {
-			edit.AddFile(Level(lv), f.number, f.size, f.smallest, f.largest)
-		}
-	}
-
-	record := edit.Append(nil)
-	return wrapIOError(log.AddRecord(record), "write manifest snapshot")
 }
 
 func (vs *VersionSet) Recover() error {

@@ -103,6 +103,7 @@ const (
 	defaultBlockSize            = 4 * 1024
 	defaultBlockRestartInterval = 16
 	defaultMaxFileSize          = 4 * 1024 * 1024
+	defaultMaxManifestFileSize  = 64 * 1024 * 1024
 	defaultWriteBufferSize      = 4 * 1024 * 1024
 	defaultMaxOpenFiles         = 1000
 	defaultBlockCacheSize       = 64 * 1024 * 1024
@@ -160,7 +161,7 @@ func DefaultOptions() *Options {
 		BlockSize:            defaultBlockSize,
 		BlockRestartInterval: defaultBlockRestartInterval,
 		MaxFileSize:          defaultMaxFileSize,
-		MaxManifestFileSize:  64 << 20,
+		MaxManifestFileSize:  defaultMaxManifestFileSize,
 		WriteBufferSize:      defaultWriteBufferSize,
 		MaxOpenFiles:         defaultMaxOpenFiles,
 		BlockCacheSize:       defaultBlockCacheSize,

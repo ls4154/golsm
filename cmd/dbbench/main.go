@@ -23,6 +23,7 @@ type config struct {
 	blockSize        int
 	blockRestart     int
 	maxFileSize      uint64
+	maxManifestSize  uint64
 	cacheSize        int
 	openFiles        int
 	bloomBits        int
@@ -143,6 +144,7 @@ func openDB(cfg config) (db.DB, error) {
 	if cfg.maxFileSize > 0 {
 		opt.MaxFileSize = cfg.maxFileSize
 	}
+	opt.MaxManifestFileSize = cfg.maxManifestSize
 	if cfg.cacheSize >= 0 {
 		opt.BlockCacheSize = cfg.cacheSize
 	}
@@ -161,7 +163,7 @@ func printBanner(cfg config) {
 	if reads < 0 {
 		reads = cfg.num
 	}
-	fmt.Printf("dbbench: db=%s num=%d reads=%d value_size=%d threads=%d seed=%d sync=%v compression=%s compression_ratio=%.2f block_size=%d block_restart_interval=%d cache_size=%d open_files=%d bloom_bits=%d paranoid_checks=%v\n",
+	fmt.Printf("dbbench: db=%s num=%d reads=%d value_size=%d threads=%d seed=%d sync=%v compression=%s compression_ratio=%.2f block_size=%d block_restart_interval=%d max_file_size=%d max_manifest_file_size=%d cache_size=%d open_files=%d bloom_bits=%d paranoid_checks=%v\n",
 		cfg.dbPath,
 		cfg.num,
 		reads,
@@ -173,6 +175,8 @@ func printBanner(cfg config) {
 		cfg.compressionRatio,
 		cfg.blockSize,
 		cfg.blockRestart,
+		cfg.maxFileSize,
+		cfg.maxManifestSize,
 		cfg.cacheSize,
 		cfg.openFiles,
 		cfg.bloomBits,
@@ -240,6 +244,7 @@ func parseFlags() config {
 	flag.IntVar(&cfg.blockSize, "block_size", def.BlockSize, "sstable data block size")
 	flag.IntVar(&cfg.blockRestart, "block_restart_interval", def.BlockRestartInterval, "restart interval for block key compression")
 	flag.Uint64Var(&cfg.maxFileSize, "max_file_size", 0, "max table file size (0: use DB default)")
+	flag.Uint64Var(&cfg.maxManifestSize, "max_manifest_file_size", def.MaxManifestFileSize, "max MANIFEST file size (0: disable rotation)")
 	flag.IntVar(&cfg.cacheSize, "cache_size", -1, "block cache size in bytes (-1: use DB default)")
 	flag.IntVar(&cfg.openFiles, "open_files", 0, "max open files (0: use DB default)")
 	flag.IntVar(&cfg.bloomBits, "bloom_bits", 0, "Bloom filter bits per key (0: disable filter)")
