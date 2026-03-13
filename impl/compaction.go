@@ -61,8 +61,6 @@ func (d *dbImpl) doCompactionWork(c *Compaction) error {
 	for input.Valid() {
 		key := input.Key()
 
-		// TODO check split
-
 		drop := false
 
 		ikey, parseErr := ParseInternalKey(key)
@@ -73,6 +71,19 @@ func (d *dbImpl) doCompactionWork(c *Compaction) error {
 			lastSequenceForKey = MaxSequenceNumber
 		} else {
 			if !hasCurUserKey || d.icmp.userCmp.Compare(ikey.UserKey, curUserKey) != 0 {
+				// Grandparent-overlap split only fires at a user-key boundary.
+				if builder != nil && c.ShouldStopBefore(key) {
+					finErr := d.FinishCompactionOutputFile(curOutput, curOutfile, builder, input.Error() != nil)
+					if finErr != nil {
+						err = finErr
+						break
+					}
+
+					builder = nil
+					curOutfile = nil
+					curOutput = nil
+				}
+
 				// new user key; set to MaxSequenceNumber so the first
 				// (newest) entry is never dropped.
 				hasCurUserKey = true

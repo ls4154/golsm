@@ -237,11 +237,20 @@ type Compaction struct {
 
 	inputVersion *Version
 	inputs       [2][]*FileMetaData
-	edit         VersionEdit
+	grandparents []*FileMetaData
+
+	maxGrandparentOverlapBytes uint64
+	grandparentIndex           int
+	seenKey                    bool
+	overlappedBytes            uint64
+
+	edit VersionEdit
 }
 
 func (c *Compaction) IsTrivial() bool {
-	return len(c.inputs[0]) == 1 && len(c.inputs[1]) == 0
+	// Large level+2 overlap makes a "cheap" move expensive later.
+	return len(c.inputs[0]) == 1 && len(c.inputs[1]) == 0 &&
+		totalFileSize(c.grandparents) <= c.maxGrandparentOverlapBytes
 }
 
 func (c *Compaction) Release() {
@@ -273,6 +282,25 @@ func (c *Compaction) NewInputIterator() (db.Iterator, error) {
 	}
 
 	return newMergingIterator(vset.icmp, iters), nil
+}
+
+func (c *Compaction) ShouldStopBefore(internalKey []byte) bool {
+	icmp := c.inputVersion.vset.icmp
+	for c.grandparentIndex < len(c.grandparents) &&
+		icmp.Compare(internalKey, c.grandparents[c.grandparentIndex].largest) > 0 {
+		if c.seenKey {
+			c.overlappedBytes += c.grandparents[c.grandparentIndex].size
+		}
+		c.grandparentIndex++
+	}
+	c.seenKey = true
+
+	if c.overlappedBytes > c.maxGrandparentOverlapBytes {
+		// Split before one output drags too much level+2 data into the next compaction.
+		c.overlappedBytes = 0
+		return true
+	}
+	return false
 }
 
 type VersionBuilder struct {
@@ -744,8 +772,9 @@ func (vs *VersionSet) PickCompaction() *Compaction {
 	}
 
 	c := &Compaction{
-		level:        level,
-		inputVersion: cur,
+		level:                      level,
+		inputVersion:               cur,
+		maxGrandparentOverlapBytes: vs.compaction.maxGrandparentOverlapBytes(),
 	}
 	cur.Ref()
 
@@ -798,15 +827,28 @@ func (vs *VersionSet) setupOtherInputs(c *Compaction) {
 	allStart, allLimit := getRange(vs.icmp, append(c.inputs[0], c.inputs[1]...))
 
 	if len(c.inputs[1]) > 0 {
-		// TODO try expand base level without exapanding next level
-		_ = allStart
-		_ = allLimit
+		expanded0 := cur.getOverlappingFiles(level, allStart, allLimit)
+		addBoundaryInputs(vs.icmp, cur.files[level], &expanded0)
+
+		inputs1Size := totalFileSize(c.inputs[1])
+		expanded0Size := totalFileSize(expanded0)
+		if len(expanded0) > len(c.inputs[0]) &&
+			inputs1Size+expanded0Size < vs.compaction.expandedCompactionByteSizeLimit() {
+			newStart, newLimit := getRange(vs.icmp, expanded0)
+			expanded1 := cur.getOverlappingFiles(level+1, newStart, newLimit)
+			addBoundaryInputs(vs.icmp, cur.files[level+1], &expanded1)
+			if len(expanded1) == len(c.inputs[1]) {
+				smallest = newStart
+				largest = newLimit
+				c.inputs[0] = expanded0
+				c.inputs[1] = expanded1
+				allStart, allLimit = getRange(vs.icmp, append(c.inputs[0], c.inputs[1]...))
+			}
+		}
 	}
 
 	if level+2 < NumLevels {
-		// TODO grandparent level
-		_ = allStart
-		_ = allLimit
+		c.grandparents = cur.getOverlappingFiles(level+2, allStart, allLimit)
 	}
 
 	vs.compactPointer[level] = largest

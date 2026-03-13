@@ -75,7 +75,7 @@ func Open(userOpt *db.Options, dbname string) (db.DB, error) {
 		bcache = table.NewBlockCache(opt.BlockCacheSize)
 	}
 	tcache := NewTableCache(dbname, env, opt.MaxOpenFiles, icmp, ifilter, bcache, opt.ParanoidChecks)
-	vset := NewVersionSet(dbname, icmp, env, tcache, opt.ParanoidChecks, opt.MaxManifestFileSize, logger, newCompactionPolicy(opt.Compaction))
+	vset := NewVersionSet(dbname, icmp, env, tcache, opt.ParanoidChecks, opt.MaxManifestFileSize, logger, newCompactionPolicy(opt.Compaction, opt.MaxFileSize))
 	snapshots := NewSnapshotList()
 
 	db := &dbImpl{

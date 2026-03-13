@@ -106,7 +106,8 @@ func TestGetProperty(t *testing.T) {
 
 func TestGetPropertyStatsIncludesLevelWithRecordedStats(t *testing.T) {
 	env := &recordingEnv{}
-	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false, 64<<20, nil, newCompactionPolicy(db.DefaultCompactionOptions(0)))
+	vset := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false, 64<<20, nil,
+		newCompactionPolicy(db.DefaultCompactionOptions(0), db.DefaultOptions().MaxFileSize))
 	v := vset.NewVersion()
 	vset.AppendVersion(v)
 

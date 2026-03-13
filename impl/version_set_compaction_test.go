@@ -37,7 +37,8 @@ func testVersionSetForCompactionWithPolicy(opt *db.CompactionOptions) *VersionSe
 	if err != nil {
 		panic(err)
 	}
-	return NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, nil, nil, false, 64<<20, nil, newCompactionPolicy(validated))
+	return NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, nil, nil, false, 64<<20, nil,
+		newCompactionPolicy(validated, db.DefaultOptions().MaxFileSize))
 }
 
 func TestVersionSetNeedsCompactionL0Trigger(t *testing.T) {
@@ -156,9 +157,9 @@ func TestVersionSetPickCompactionUsesCompactPointer(t *testing.T) {
 	defer c.Release()
 	require.NotNil(t, c)
 	require.Equal(t, Level(1), c.level)
-	require.Equal(t, []FileNumber{2}, []FileNumber{c.inputs[0][0].number})
+	require.Equal(t, []FileNumber{2, 3}, []FileNumber{c.inputs[0][0].number, c.inputs[0][1].number})
 	require.Equal(t, []FileNumber{21, 22}, []FileNumber{c.inputs[1][0].number, c.inputs[1][1].number})
-	require.Equal(t, f2.largest, vs.compactPointer[1])
+	require.Equal(t, f3.largest, vs.compactPointer[1])
 }
 
 func TestVersionSetCompactPointerWrapsAround(t *testing.T) {
@@ -238,6 +239,119 @@ func TestCompactionIsNotTrivialWithOverlap(t *testing.T) {
 	require.Len(t, c.inputs[0], 1)
 	require.Len(t, c.inputs[1], 1)
 	require.False(t, c.IsTrivial())
+}
+
+func TestCompactionIsNotTrivialWithLargeGrandparentOverlap(t *testing.T) {
+	vs := testVersionSetForCompaction()
+	v := vs.NewVersion()
+	f1 := testFile(1, 1, 1, "a", "c")
+	g1 := testFile(3, 2, 25<<20, "a", "b")
+	g2 := testFile(3, 3, 25<<20, "b", "d")
+	v.files[1] = []*FileMetaData{f1}
+	v.files[3] = []*FileMetaData{g1, g2}
+
+	v.compactionLevel = 1
+	v.compactionScore = 1.1
+	vs.AppendVersion(v)
+
+	c := vs.PickCompaction()
+	defer c.Release()
+	require.NotNil(t, c)
+	require.Len(t, c.inputs[1], 0)
+	require.Len(t, c.grandparents, 2)
+	require.False(t, c.IsTrivial())
+}
+
+func TestPickCompactionCollectsGrandparentFiles(t *testing.T) {
+	vs := testVersionSetForCompaction()
+	v := vs.NewVersion()
+
+	f1 := testFile(1, 1, 1, "a", "c")
+	p1 := testFile(2, 2, 1, "b", "d")
+	g1 := testFile(3, 3, 1, "a", "b")
+	g2 := testFile(3, 4, 1, "c", "e")
+	g3 := testFile(3, 5, 1, "x", "z")
+
+	v.files[1] = []*FileMetaData{f1}
+	v.files[2] = []*FileMetaData{p1}
+	v.files[3] = []*FileMetaData{g1, g2, g3}
+	v.compactionLevel = 1
+	v.compactionScore = 1.1
+	vs.AppendVersion(v)
+
+	c := vs.PickCompaction()
+	defer c.Release()
+	require.NotNil(t, c)
+	require.Len(t, c.grandparents, 2)
+	require.Equal(t, FileNumber(3), c.grandparents[0].number)
+	require.Equal(t, FileNumber(4), c.grandparents[1].number)
+}
+
+func TestPickCompactionExpandsBaseInputsWithoutGrowingNextLevel(t *testing.T) {
+	vs := testVersionSetForCompaction()
+	v := vs.NewVersion()
+
+	f1 := testFile(1, 1, 1, "a", "c")
+	f2 := testFile(1, 2, 1, "d", "f")
+	p1 := testFile(2, 3, 1, "b", "e")
+
+	v.files[1] = []*FileMetaData{f1, f2}
+	v.files[2] = []*FileMetaData{p1}
+	v.compactionLevel = 1
+	v.compactionScore = 1.1
+	vs.AppendVersion(v)
+
+	c := vs.PickCompaction()
+	defer c.Release()
+	require.NotNil(t, c)
+	require.Len(t, c.inputs[0], 2)
+	require.Equal(t, FileNumber(1), c.inputs[0][0].number)
+	require.Equal(t, FileNumber(2), c.inputs[0][1].number)
+	require.Len(t, c.inputs[1], 1)
+	require.Equal(t, FileNumber(3), c.inputs[1][0].number)
+}
+
+func TestPickCompactionDoesNotExpandBaseInputsWhenNextLevelWouldGrow(t *testing.T) {
+	vs := testVersionSetForCompaction()
+	v := vs.NewVersion()
+
+	f1 := testFile(1, 1, 1, "a", "c")
+	f2 := testFile(1, 2, 1, "d", "f")
+	p1 := testFile(2, 3, 1, "b", "c")
+	p2 := testFile(2, 4, 1, "e", "g")
+
+	v.files[1] = []*FileMetaData{f1, f2}
+	v.files[2] = []*FileMetaData{p1, p2}
+	v.compactionLevel = 1
+	v.compactionScore = 1.1
+	vs.AppendVersion(v)
+
+	c := vs.PickCompaction()
+	defer c.Release()
+	require.NotNil(t, c)
+	require.Len(t, c.inputs[0], 1)
+	require.Equal(t, FileNumber(1), c.inputs[0][0].number)
+	require.Len(t, c.inputs[1], 1)
+	require.Equal(t, FileNumber(3), c.inputs[1][0].number)
+}
+
+func TestCompactionShouldStopBeforeWhenGrandparentOverlapBudgetExceeded(t *testing.T) {
+	vs := testVersionSetForCompaction()
+	v := vs.NewVersion()
+	vs.AppendVersion(v)
+
+	c := &Compaction{
+		inputVersion:               vs.current,
+		maxGrandparentOverlapBytes: 10,
+		grandparents: []*FileMetaData{
+			testFile(3, 1, 5, "a", "c"),
+			testFile(3, 2, 6, "d", "f"),
+		},
+	}
+
+	require.False(t, c.ShouldStopBefore(compactionInternalKey("b", 1)))
+	require.False(t, c.ShouldStopBefore(compactionInternalKey("d", 1)))
+	require.True(t, c.ShouldStopBefore(compactionInternalKey("g", 1)))
 }
 
 func TestAddBoundaryInputs(t *testing.T) {

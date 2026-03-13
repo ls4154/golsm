@@ -147,7 +147,7 @@ func TestLogAndApplyRotationFailureKeepsOldManifestOpen(t *testing.T) {
 	}
 
 	vs := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false, 1, nil,
-		newCompactionPolicy(db.DefaultCompactionOptions(0)))
+		newCompactionPolicy(db.DefaultCompactionOptions(0), db.DefaultOptions().MaxFileSize))
 
 	oldFile := &trackedWritableFile{}
 	vs.manifestFileNumber = 7
