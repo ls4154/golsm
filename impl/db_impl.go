@@ -474,17 +474,20 @@ func (d *dbImpl) NewIterator(options *db.ReadOptions) (db.Iterator, error) {
 }
 
 func (d *dbImpl) newInternalIterator(options *db.ReadOptions) (db.Iterator, SequenceNumber, error) {
-	iters := make([]db.Iterator, 0, 4)
-
 	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	latestSnapshot := d.versions.GetLastSequence()
 	current := d.versions.current
+	current.Ref()
+	mem := d.mem
+	imm := d.imm
 
-	iters = append(iters, d.mem.Iterator())
-	if d.imm != nil {
-		iters = append(iters, d.imm.Iterator())
+	d.mu.Unlock()
+
+	iters := make([]db.Iterator, 0, 4)
+	iters = append(iters, mem.Iterator())
+	if imm != nil {
+		iters = append(iters, imm.Iterator())
 	}
 
 	var verifyChecksum bool
@@ -499,10 +502,11 @@ func (d *dbImpl) newInternalIterator(options *db.ReadOptions) (db.Iterator, Sequ
 		for _, it := range iters {
 			_ = it.Close()
 		}
+		d.mu.Lock()
+		current.Unref()
+		d.mu.Unlock()
 		return nil, 0, err
 	}
-
-	current.Ref()
 
 	internalIter := newMergingIterator(d.icmp, iters)
 	return newCleanupIterator(internalIter, func() {

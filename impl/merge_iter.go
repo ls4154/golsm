@@ -6,14 +6,14 @@ type mergingIterator struct {
 	cmp      *InternalKeyComparator
 	children []db.Iterator
 	current  db.Iterator
-	dir      iterDirection
+	reverse  bool
 }
 
 func newMergingIterator(cmp *InternalKeyComparator, children []db.Iterator) *mergingIterator {
 	return &mergingIterator{
 		cmp:      cmp,
 		children: children,
-		dir:      directionForward,
+		reverse:  false,
 	}
 }
 
@@ -25,7 +25,7 @@ func (it *mergingIterator) SeekToFirst() {
 	for _, child := range it.children {
 		child.SeekToFirst()
 	}
-	it.dir = directionForward
+	it.reverse = false
 	it.findSmallest()
 }
 
@@ -33,7 +33,7 @@ func (it *mergingIterator) SeekToLast() {
 	for _, child := range it.children {
 		child.SeekToLast()
 	}
-	it.dir = directionReverse
+	it.reverse = true
 	it.findLargest()
 }
 
@@ -41,7 +41,7 @@ func (it *mergingIterator) Seek(target []byte) {
 	for _, child := range it.children {
 		child.Seek(target)
 	}
-	it.dir = directionForward
+	it.reverse = false
 	it.findSmallest()
 }
 
@@ -50,7 +50,7 @@ func (it *mergingIterator) Next() {
 		return
 	}
 
-	if it.dir != directionForward {
+	if it.reverse {
 		key := it.current.Key()
 		for _, child := range it.children {
 			if child == it.current {
@@ -61,7 +61,7 @@ func (it *mergingIterator) Next() {
 				child.Next()
 			}
 		}
-		it.dir = directionForward
+		it.reverse = false
 	}
 
 	it.current.Next()
@@ -73,7 +73,7 @@ func (it *mergingIterator) Prev() {
 		return
 	}
 
-	if it.dir != directionReverse {
+	if !it.reverse {
 		key := it.current.Key()
 		for _, child := range it.children {
 			if child == it.current {
@@ -86,7 +86,7 @@ func (it *mergingIterator) Prev() {
 				child.SeekToLast()
 			}
 		}
-		it.dir = directionReverse
+		it.reverse = true
 	}
 
 	it.current.Prev()

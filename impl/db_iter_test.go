@@ -387,6 +387,62 @@ func TestDBIterNoErrorOnNormalPath(t *testing.T) {
 	require.Equal(t, []string{"1", "2"}, values)
 }
 
+func TestDBIterForwardBuffersAreDetachedFromChildIterators(t *testing.T) {
+	iter := buildInternalKeys(t, []struct {
+		seq SequenceNumber
+		typ ValueType
+		key string
+		val string
+	}{
+		{seq: 2, typ: TypeValue, key: "a", val: "va"},
+		{seq: 1, typ: TypeValue, key: "b", val: "vb"},
+	})
+
+	di := newDBIter(iter, util.BytewiseComparator, MaxSequenceNumber)
+	defer di.Close()
+
+	di.SeekToFirst()
+	require.True(t, di.Valid())
+
+	key := di.Key()
+	value := di.Value()
+	key[0] = 'z'
+	value[0] = 'x'
+
+	di.Next()
+	require.True(t, di.Valid())
+	require.Equal(t, "b", string(di.Key()))
+	require.Equal(t, "vb", string(di.Value()))
+}
+
+func TestDBIterReverseBuffersAreDetachedFromTraversalState(t *testing.T) {
+	iter := buildInternalKeys(t, []struct {
+		seq SequenceNumber
+		typ ValueType
+		key string
+		val string
+	}{
+		{seq: 1, typ: TypeValue, key: "a", val: "va"},
+		{seq: 2, typ: TypeValue, key: "b", val: "vb"},
+	})
+
+	di := newDBIter(iter, util.BytewiseComparator, MaxSequenceNumber)
+	defer di.Close()
+
+	di.SeekToLast()
+	require.True(t, di.Valid())
+
+	key := di.Key()
+	value := di.Value()
+	key[0] = 'z'
+	value[0] = 'x'
+
+	di.Prev()
+	require.True(t, di.Valid())
+	require.Equal(t, "a", string(di.Key()))
+	require.Equal(t, "va", string(di.Value()))
+}
+
 func TestDBIterDoubleClose(t *testing.T) {
 	iter := buildInternalKeys(t, []struct {
 		seq SequenceNumber

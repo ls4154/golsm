@@ -60,9 +60,13 @@ type Iterator interface {
 	Prev()
 	// Key returns the current entry key.
 	// It must be called only when Valid() is true.
+	// The returned slice is read-only and is only valid until the next
+	// iterator movement method (SeekToFirst/SeekToLast/Seek/Next/Prev) or Close.
 	Key() []byte
 	// Value returns the current entry value.
 	// It must be called only when Valid() is true.
+	// The returned slice is read-only and is only valid until the next
+	// iterator movement method (SeekToFirst/SeekToLast/Seek/Next/Prev) or Close.
 	Value() []byte
 	// Error returns the terminal error seen during iteration, if any.
 	Error() error

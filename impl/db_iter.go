@@ -7,24 +7,20 @@ import (
 	"github.com/ls4154/golsm/util"
 )
 
-type iterDirection int8
-
-const (
-	directionForward iterDirection = iota
-	directionReverse
-)
+const dbIterBufferTrimThreshold = 10 << 20
 
 type dbIter struct {
 	iter    db.Iterator
 	userCmp db.Comparator
 	seq     SequenceNumber
 
-	direction iterDirection
-	valid     bool
-	err       error
+	reverse bool
+	valid   bool
+	err     error
 
-	savedKey   []byte // current user key for reverse direction, temporary storage
-	savedValue []byte
+	savedKey []byte // internal scratch key for skip/reverse traversal
+	keyBuf   []byte
+	valueBuf []byte
 
 	closed bool
 }
@@ -36,9 +32,9 @@ func newDBIter(iter db.Iterator, userCmp db.Comparator, seq SequenceNumber) *dbI
 		userCmp: userCmp,
 		seq:     seq,
 
-		direction: directionForward,
-		valid:     false,
-		err:       nil,
+		reverse: false,
+		valid:   false,
+		err:     nil,
 	}
 }
 
@@ -47,24 +43,40 @@ func (it *dbIter) Valid() bool {
 }
 
 func (it *dbIter) saveValue(val []byte) {
-	if cap(it.savedValue) > len(val)+1048576 {
-		it.savedValue = append([]byte(nil), val...)
+	if cap(it.valueBuf) > len(val)+dbIterBufferTrimThreshold {
+		it.valueBuf = append([]byte(nil), val...)
 	} else {
-		it.savedValue = append(it.savedValue[:0], val...)
+		it.valueBuf = append(it.valueBuf[:0], val...)
 	}
 }
 
-func (it *dbIter) clearSavedValue() {
-	if cap(it.savedValue) > 1048576 {
-		it.savedValue = []byte{}
+func (it *dbIter) saveKey(key []byte) {
+	it.keyBuf = append(it.keyBuf[:0], key...)
+}
+
+func (it *dbIter) setCurrent(key, val []byte) {
+	it.saveKey(key)
+	it.saveValue(val)
+}
+
+func (it *dbIter) clearCurrent() {
+	if cap(it.keyBuf) > dbIterBufferTrimThreshold {
+		it.keyBuf = []byte{}
 	} else {
-		it.savedValue = it.savedValue[:0]
+		it.keyBuf = it.keyBuf[:0]
+	}
+
+	if cap(it.valueBuf) > dbIterBufferTrimThreshold {
+		it.valueBuf = []byte{}
+	} else {
+		it.valueBuf = it.valueBuf[:0]
 	}
 }
 
 func (it *dbIter) SeekToFirst() {
-	it.direction = directionForward
-	it.clearSavedValue()
+	it.reverse = false
+	it.clearCurrent()
+	it.savedKey = it.savedKey[:0]
 	it.iter.SeekToFirst()
 	if it.iter.Valid() {
 		it.findNextUserEntry(false)
@@ -74,15 +86,16 @@ func (it *dbIter) SeekToFirst() {
 }
 
 func (it *dbIter) SeekToLast() {
-	it.direction = directionReverse
-	it.clearSavedValue()
+	it.reverse = true
+	it.clearCurrent()
+	it.savedKey = it.savedKey[:0]
 	it.iter.SeekToLast()
 	it.findPrevUserEntry()
 }
 
 func (it *dbIter) Seek(target []byte) {
-	it.direction = directionForward
-	it.clearSavedValue()
+	it.reverse = false
+	it.clearCurrent()
 	it.savedKey = it.savedKey[:0]
 
 	var lk LookupKey
@@ -98,8 +111,8 @@ func (it *dbIter) Seek(target []byte) {
 func (it *dbIter) Next() {
 	util.Assert(it.valid)
 
-	if it.direction == directionReverse {
-		it.direction = directionForward
+	if it.reverse {
+		it.reverse = false
 
 		if !it.iter.Valid() {
 			it.iter.SeekToFirst()
@@ -115,6 +128,7 @@ func (it *dbIter) Next() {
 	if !it.iter.Valid() {
 		it.valid = false
 		it.savedKey = it.savedKey[:0]
+		it.clearCurrent()
 		return
 	}
 
@@ -124,7 +138,7 @@ func (it *dbIter) Next() {
 func (it *dbIter) Prev() {
 	util.Assert(it.valid)
 
-	if it.direction == directionForward {
+	if !it.reverse {
 		util.Assert(it.iter.Valid())
 
 		it.savedKey = append(it.savedKey[:0], ExtractUserKey(it.iter.Key())...)
@@ -133,7 +147,7 @@ func (it *dbIter) Prev() {
 			if !it.iter.Valid() {
 				it.valid = false
 				it.savedKey = it.savedKey[:0]
-				it.clearSavedValue()
+				it.clearCurrent()
 				return
 			}
 
@@ -141,7 +155,7 @@ func (it *dbIter) Prev() {
 				break
 			}
 		}
-		it.direction = directionReverse
+		it.reverse = true
 	}
 
 	it.findPrevUserEntry()
@@ -149,20 +163,12 @@ func (it *dbIter) Prev() {
 
 func (it *dbIter) Key() []byte {
 	util.Assert(it.valid)
-	if it.direction == directionForward {
-		return ExtractUserKey(it.iter.Key())
-	} else {
-		return it.savedKey
-	}
+	return it.keyBuf
 }
 
 func (it *dbIter) Value() []byte {
 	util.Assert(it.valid)
-	if it.direction == directionForward {
-		return it.iter.Value()
-	} else {
-		return it.savedValue
-	}
+	return it.valueBuf
 }
 
 func (it *dbIter) Error() error {
@@ -188,7 +194,7 @@ func (it *dbIter) Close() error {
 
 func (it *dbIter) findNextUserEntry(skipping bool) {
 	util.Assert(it.iter.Valid())
-	util.Assert(it.direction == directionForward)
+	util.Assert(!it.reverse)
 
 	for it.iter.Valid() {
 		ikey, err := ParseInternalKey(it.iter.Key())
@@ -196,7 +202,7 @@ func (it *dbIter) findNextUserEntry(skipping bool) {
 			it.err = fmt.Errorf("%w: corrupted internal key in dbIter", err)
 			it.valid = false
 			it.savedKey = it.savedKey[:0]
-			it.clearSavedValue()
+			it.clearCurrent()
 			return
 		}
 
@@ -210,6 +216,7 @@ func (it *dbIter) findNextUserEntry(skipping bool) {
 				if skipping && it.userCmp.Compare(ikey.UserKey, it.savedKey) <= 0 {
 					// skip hidden entry
 				} else {
+					it.setCurrent(ikey.UserKey, it.iter.Value())
 					it.valid = true
 					it.savedKey = it.savedKey[:0]
 					return
@@ -222,10 +229,11 @@ func (it *dbIter) findNextUserEntry(skipping bool) {
 
 	it.valid = false
 	it.savedKey = it.savedKey[:0]
+	it.clearCurrent()
 }
 
 func (it *dbIter) findPrevUserEntry() {
-	util.Assert(it.direction == directionReverse)
+	util.Assert(it.reverse)
 
 	lastValueType := TypeDeletion
 	for it.iter.Valid() {
@@ -234,7 +242,7 @@ func (it *dbIter) findPrevUserEntry() {
 			it.err = fmt.Errorf("%w: corrupted internal key in dbIter", err)
 			it.valid = false
 			it.savedKey = it.savedKey[:0]
-			it.clearSavedValue()
+			it.clearCurrent()
 			return
 		}
 
@@ -245,12 +253,12 @@ func (it *dbIter) findPrevUserEntry() {
 			lastValueType = ikey.Type
 			if lastValueType == TypeDeletion {
 				it.savedKey = it.savedKey[:0]
-				it.clearSavedValue()
+				it.clearCurrent()
 			} else {
 				userKey := ExtractUserKey(it.iter.Key())
 				val := it.iter.Value()
 				it.savedKey = append(it.savedKey[:0], userKey...)
-				it.saveValue(val)
+				it.setCurrent(userKey, val)
 			}
 		}
 
@@ -260,8 +268,8 @@ func (it *dbIter) findPrevUserEntry() {
 	if lastValueType == TypeDeletion {
 		it.valid = false
 		it.savedKey = it.savedKey[:0]
-		it.clearSavedValue()
-		it.direction = directionForward
+		it.clearCurrent()
+		it.reverse = false
 	} else {
 		it.valid = true
 	}
