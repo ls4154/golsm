@@ -76,7 +76,7 @@ func (b *bufWritableFile) Sync() error {
 	if err := b.w.Flush(); err != nil {
 		return err
 	}
-	return b.f.Sync()
+	return syncFile(b.f)
 }
 
 func (b *bufWritableFile) Close() error {
