@@ -63,10 +63,10 @@ func validateCompactionOptions(userOpt *db.CompactionOptions, writeBufferSize in
 		opt.L0StopWritesTrigger = clipToRange(userOpt.L0StopWritesTrigger, 1, 1000)
 	}
 	if userOpt.LevelBytesBase != 0 {
-		opt.LevelBytesBase = clipToRange(userOpt.LevelBytesBase, uint64(1<<20), uint64(1<<50))
+		opt.LevelBytesBase = clipToRange(userOpt.LevelBytesBase, uint64(1<<20), uint64(1<<40))
 	}
 	if userOpt.LevelBytesMultiplier != 0 {
-		opt.LevelBytesMultiplier = clipToRange(userOpt.LevelBytesMultiplier, 1, 100)
+		opt.LevelBytesMultiplier = clipToRange(userOpt.LevelBytesMultiplier, 2, 100)
 	}
 
 	if opt.L0SlowdownTrigger < opt.L0CompactionTrigger {

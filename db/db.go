@@ -108,8 +108,8 @@ const (
 	defaultBlockRestartInterval = 16
 	defaultMaxFileSize          = 4 * 1024 * 1024
 	defaultMaxManifestFileSize  = 64 * 1024 * 1024
-	defaultWriteBufferSize      = 4 * 1024 * 1024
-	defaultMaxOpenFiles         = 1000
+	defaultWriteBufferSize      = 8 * 1024 * 1024
+	defaultMaxOpenFiles         = 4096
 	defaultBlockCacheSize       = 64 * 1024 * 1024
 )
 
