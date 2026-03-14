@@ -525,6 +525,10 @@ func (vs *VersionSet) LogAndApply(edit *VersionEdit, dbMu *sync.Mutex) error {
 	}
 
 	if err == nil {
+		err = syncDirIfSupported(vs.env, vs.dbname)
+	}
+
+	if err == nil {
 		err = writeDescriptorFile.Sync()
 	}
 

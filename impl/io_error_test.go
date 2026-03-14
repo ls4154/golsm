@@ -21,6 +21,8 @@ type failingEnv struct {
 	newWritableErr     error
 	newRandomAccessErr error
 	renameErr          error
+	syncDirErr         error
+	syncDirs           []string
 }
 
 func (e *failingEnv) NewSequentialFile(name string) (fs.SequentialFile, error) {
@@ -54,6 +56,14 @@ func (e *failingEnv) RenameFile(src, target string) error {
 	return nil
 }
 
+func (e *failingEnv) SyncDir(name string) error {
+	e.syncDirs = append(e.syncDirs, name)
+	if e.syncDirErr != nil {
+		return e.syncDirErr
+	}
+	return nil
+}
+
 func (e *failingEnv) FileExists(name string) bool               { return false }
 func (e *failingEnv) GetFileSize(name string) (uint64, error)   { return 0, db.ErrNotSupported }
 func (e *failingEnv) GetChildren(path string) ([]string, error) { return nil, db.ErrNotSupported }
@@ -70,6 +80,24 @@ func TestSetCurrentFileWrapsIOError(t *testing.T) {
 	err := SetCurrentFile(env, "/db", 7)
 	require.ErrorIs(t, err, db.ErrIO)
 	require.ErrorContains(t, err, "rename failed")
+}
+
+func TestSetCurrentFileSyncsParentDir(t *testing.T) {
+	env := &failingEnv{}
+
+	err := SetCurrentFile(env, "/db", 7)
+	require.NoError(t, err)
+	require.Equal(t, []string{"/db"}, env.syncDirs)
+}
+
+func TestSetCurrentFileWrapsDirSyncIOError(t *testing.T) {
+	env := &failingEnv{
+		syncDirErr: errors.New("dir sync failed"),
+	}
+
+	err := SetCurrentFile(env, "/db", 7)
+	require.ErrorIs(t, err, db.ErrIO)
+	require.ErrorContains(t, err, "dir sync failed")
 }
 
 func TestTableCacheGetWrapsIOError(t *testing.T) {

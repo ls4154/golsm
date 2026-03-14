@@ -323,6 +323,11 @@ func (d *dbImpl) initManifest() error {
 		return wrapIOError(err, "write initial manifest %s", manifest)
 	}
 
+	err = syncDirIfSupported(d.env, d.dbname)
+	if err != nil {
+		return wrapIOError(err, "sync database directory %s", d.dbname)
+	}
+
 	err = f.Sync()
 	if err != nil {
 		return wrapIOError(err, "sync manifest %s", manifest)
@@ -589,6 +594,11 @@ func SetCurrentFile(env fs.Env, dbname string, num FileNumber) error {
 	if err != nil {
 		env.RemoveFile(tmp)
 		return wrapIOError(err, "rename %s to %s", tmp, CurrentFileName(dbname))
+	}
+
+	err = syncDirIfSupported(env, dbname)
+	if err != nil {
+		return wrapIOError(err, "sync database directory %s", dbname)
 	}
 
 	return nil

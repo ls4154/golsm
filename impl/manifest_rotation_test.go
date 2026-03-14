@@ -57,6 +57,7 @@ func TestManifestRotationBySize(t *testing.T) {
 
 type trackedWritableFile struct {
 	closed bool
+	onSync func()
 }
 
 func (f *trackedWritableFile) Write(p []byte) (int, error) {
@@ -85,13 +86,18 @@ func (f *trackedWritableFile) Sync() error {
 	if f.closed {
 		return errors.New("sync on closed file")
 	}
+	if f.onSync != nil {
+		f.onSync()
+	}
 	return nil
 }
 
 type manifestRotationFailEnv struct {
-	renameErr error
-	files     map[string]*trackedWritableFile
-	removed   []string
+	renameErr  error
+	syncDirErr error
+	files      map[string]*trackedWritableFile
+	removed    []string
+	events     []string
 }
 
 func (e *manifestRotationFailEnv) NewSequentialFile(name string) (fs.SequentialFile, error) {
@@ -106,7 +112,11 @@ func (e *manifestRotationFailEnv) NewWritableFile(name string) (fs.WritableFile,
 	if e.files == nil {
 		e.files = make(map[string]*trackedWritableFile)
 	}
-	f := &trackedWritableFile{}
+	f := &trackedWritableFile{
+		onSync: func() {
+			e.events = append(e.events, "sync:"+name)
+		},
+	}
 	e.files[name] = f
 	return f, nil
 }
@@ -123,6 +133,14 @@ func (e *manifestRotationFailEnv) RemoveFile(name string) error {
 func (e *manifestRotationFailEnv) RenameFile(src, target string) error {
 	if e.renameErr != nil {
 		return e.renameErr
+	}
+	return nil
+}
+
+func (e *manifestRotationFailEnv) SyncDir(name string) error {
+	e.events = append(e.events, "dirsync:"+name)
+	if e.syncDirErr != nil {
+		return e.syncDirErr
 	}
 	return nil
 }
@@ -172,4 +190,31 @@ func TestLogAndApplyRotationFailureKeepsOldManifestOpen(t *testing.T) {
 	err = vs.LogAndApply(&VersionEdit{}, &dbMu)
 	require.NoError(t, err)
 	dbMu.Unlock()
+}
+
+func TestLogAndApplySyncsDirBeforeManifestSync(t *testing.T) {
+	env := &manifestRotationFailEnv{}
+
+	vs := NewVersionSet("db", &InternalKeyComparator{userCmp: util.BytewiseComparator}, env, &TableCache{}, false, 1<<20, nil,
+		newCompactionPolicy(db.DefaultCompactionOptions(0), db.DefaultOptions().MaxFileSize))
+
+	oldFile := &trackedWritableFile{
+		onSync: func() {
+			env.events = append(env.events, "sync:"+DescriptorFileName("db", 7))
+		},
+	}
+	vs.manifestFileNumber = 7
+	vs.descriptorFile = oldFile
+	vs.descriptorLog = log.NewWriter(oldFile)
+
+	var dbMu sync.Mutex
+	dbMu.Lock()
+	err := vs.LogAndApply(&VersionEdit{}, &dbMu)
+	require.NoError(t, err)
+	dbMu.Unlock()
+
+	require.Equal(t, []string{
+		"dirsync:db",
+		"sync:" + DescriptorFileName("db", 7),
+	}, env.events)
 }
