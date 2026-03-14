@@ -23,7 +23,7 @@ type TableCache struct {
 	filter         db.FilterPolicy
 	paranoidChecks bool
 
-	lru *util.LRUCache[tableAndFile]
+	lru *util.ShardedLRUCache[tableAndFile]
 
 	bcache  *table.BlockCache
 	cacheID atomic.Uint64
@@ -31,7 +31,7 @@ type TableCache struct {
 
 func NewTableCache(dbname string, env fs.Env, size int, cmp db.Comparator, filter db.FilterPolicy,
 	bcache *table.BlockCache, paranoidChecks bool) *TableCache {
-	lru := util.NewLRUCache[tableAndFile](size)
+	lru := util.NewShardedLRUCache[tableAndFile](size, 4)
 	lru.SetOnEvict(func(_ []byte, v *tableAndFile) {
 		v.table.Close()
 		v.file.Close()

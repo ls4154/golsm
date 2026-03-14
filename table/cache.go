@@ -7,12 +7,12 @@ import (
 )
 
 type BlockCache struct {
-	lru *util.LRUCache[*Block]
+	lru *util.ShardedLRUCache[*Block]
 }
 
 func NewBlockCache(capacity int) *BlockCache {
 	return &BlockCache{
-		lru: util.NewLRUCache[*Block](capacity),
+		lru: util.NewShardedLRUCache[*Block](capacity, 16),
 	}
 }
 
