@@ -103,14 +103,20 @@ func (t *Table) newBlockIteratorFromIndex(indexValue []byte, verifyChecksum, byp
 	var blockRelease func()
 	if t.blockCache != nil {
 		bcacheKey := BuildBlockCacheKey(t.GetCacheID(), handle.Offset)
-		block, blockRelease = t.blockCache.Lookup(bcacheKey)
-		if block == nil {
-			block, err = ReadBlock(t.file, &handle, verifyChecksum)
+		if bypassCache {
+			block, blockRelease = t.blockCache.Lookup(bcacheKey)
+			if block == nil {
+				block, err = ReadBlock(t.file, &handle, verifyChecksum)
+				if err != nil {
+					return nil, err
+				}
+			}
+		} else {
+			block, blockRelease, err = t.blockCache.LookupOrLoad(bcacheKey, func() (*Block, error) {
+				return ReadBlock(t.file, &handle, verifyChecksum)
+			})
 			if err != nil {
 				return nil, err
-			}
-			if !bypassCache {
-				blockRelease = t.blockCache.Insert(bcacheKey, block)
 			}
 		}
 	} else {

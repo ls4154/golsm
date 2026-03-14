@@ -85,32 +85,27 @@ func (tc *TableCache) findTable(num FileNumber, size uint64) (*util.LRUHandle[ta
 	key := make([]byte, 8)
 	binary.LittleEndian.PutUint64(key, uint64(num))
 
-	if h := tc.lru.Lookup(key); h != nil {
-		return h, nil
-	}
-
-	fname := TableFileName(tc.dbname, num)
-	f, err := tc.env.NewRandomAccessFile(fname)
-	if err != nil {
-		if !errors.Is(err, fs.ErrNotExist) {
-			return nil, wrapIOError(err, "open table file %s", fname)
-		}
-		oldFname := SSTTableFileName(tc.dbname, num)
-		f, err = tc.env.NewRandomAccessFile(oldFname)
+	return tc.lru.LookupOrLoad(key, func() (tableAndFile, int, error) {
+		fname := TableFileName(tc.dbname, num)
+		f, err := tc.env.NewRandomAccessFile(fname)
 		if err != nil {
-			return nil, wrapIOError(err, "open table file %s", oldFname)
+			if !errors.Is(err, fs.ErrNotExist) {
+				return tableAndFile{}, 0, wrapIOError(err, "open table file %s", fname)
+			}
+			oldFname := SSTTableFileName(tc.dbname, num)
+			f, err = tc.env.NewRandomAccessFile(oldFname)
+			if err != nil {
+				return tableAndFile{}, 0, wrapIOError(err, "open table file %s", oldFname)
+			}
 		}
-	}
 
-	cacheID := tc.cacheID.Add(1)
-	tbl, err := table.OpenTable(f, size, tc.cmp, tc.filter, tc.bcache, cacheID, tc.paranoidChecks)
-	if err != nil {
-		_ = f.Close()
-		return nil, wrapIOError(err, "open table #%d", num)
-	}
+		cacheID := tc.cacheID.Add(1)
+		tbl, err := table.OpenTable(f, size, tc.cmp, tc.filter, tc.bcache, cacheID, tc.paranoidChecks)
+		if err != nil {
+			_ = f.Close()
+			return tableAndFile{}, 0, wrapIOError(err, "open table #%d", num)
+		}
 
-	return tc.lru.Insert(key, tableAndFile{
-		file:  f,
-		table: tbl,
-	}, 1), nil
+		return tableAndFile{file: f, table: tbl}, 1, nil
+	})
 }

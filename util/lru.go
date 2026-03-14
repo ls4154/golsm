@@ -2,10 +2,16 @@ package util
 
 import "sync"
 
+type loadCall[T any] struct {
+	done chan struct{}
+	err  error
+}
+
 type LRUCache[T any] struct {
 	lru   LRUHandle[T]
 	inUse LRUHandle[T]
-	table map[string]*LRUHandle[T]
+	table    map[string]*LRUHandle[T]
+	inflight map[string]*loadCall[T]
 	mu    sync.Mutex
 	usage int
 	cap   int
@@ -29,8 +35,9 @@ func (h *LRUHandle[T]) Value() T {
 
 func NewLRUCache[T any](capacity int) *LRUCache[T] {
 	c := &LRUCache[T]{
-		table: make(map[string]*LRUHandle[T]),
-		cap:   capacity,
+		table:    make(map[string]*LRUHandle[T]),
+		inflight: make(map[string]*loadCall[T]),
+		cap:      capacity,
 	}
 	c.lru.next = &c.lru
 	c.lru.prev = &c.lru
@@ -45,23 +52,23 @@ func (c *LRUCache[T]) SetOnEvict(fn func(k []byte, v *T)) {
 	c.onEvict = fn
 }
 
-func (c *LRUCache[T]) Lookup(key []byte) *LRUHandle[T] {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if v, ok := c.table[string(key)]; ok {
-		lruRemove(v)
-		lruAppend(&c.inUse, v)
-		v.ref++
-		return v
+func (c *LRUCache[T]) lookupLocked(keyStr string) *LRUHandle[T] {
+	if h, ok := c.table[keyStr]; ok {
+		lruRemove(h)
+		lruAppend(&c.inUse, h)
+		h.ref++
+		return h
 	}
 	return nil
 }
 
-func (c *LRUCache[T]) Insert(key []byte, value T, charge int) *LRUHandle[T] {
+func (c *LRUCache[T]) Lookup(key []byte) *LRUHandle[T] {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.lookupLocked(string(key))
+}
 
+func (c *LRUCache[T]) insertLocked(key []byte, value T, charge int) *LRUHandle[T] {
 	keyStr := string(key)
 	if existing, ok := c.table[keyStr]; ok {
 		lruRemove(existing)
@@ -94,6 +101,62 @@ func (c *LRUCache[T]) Insert(key []byte, value T, charge int) *LRUHandle[T] {
 	}
 
 	return h
+}
+
+func (c *LRUCache[T]) Insert(key []byte, value T, charge int) *LRUHandle[T] {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.insertLocked(key, value, charge)
+}
+
+// LookupOrLoad returns the cached handle for key, loading it via load on miss.
+// Concurrent misses for the same key are deduplicated: only one goroutine calls
+// load while the others wait for the result.
+func (c *LRUCache[T]) LookupOrLoad(key []byte, load func() (T, int, error)) (*LRUHandle[T], error) {
+	keyStr := string(key)
+
+	c.mu.Lock()
+	for {
+		if h := c.lookupLocked(keyStr); h != nil {
+			c.mu.Unlock()
+			return h, nil
+		}
+
+		if call, ok := c.inflight[keyStr]; ok {
+			c.mu.Unlock()
+			<-call.done
+			if call.err != nil {
+				return nil, call.err
+			}
+			c.mu.Lock()
+			continue
+		}
+
+		break
+	}
+
+	call := &loadCall[T]{done: make(chan struct{})}
+	c.inflight[keyStr] = call
+	c.mu.Unlock()
+
+	val, charge, err := load()
+
+	c.mu.Lock()
+	delete(c.inflight, keyStr)
+
+	var h *LRUHandle[T]
+	if err == nil {
+		h = c.insertLocked(key, val, charge)
+	}
+
+	call.err = err
+	close(call.done)
+	c.mu.Unlock()
+
+	if err != nil {
+		return nil, err
+	}
+	return h, nil
 }
 
 func (c *LRUCache[T]) Release(h *LRUHandle[T]) {

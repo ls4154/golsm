@@ -1,6 +1,9 @@
 package util
 
 import (
+	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -225,4 +228,121 @@ func TestLRUEraseWithOutstandingRef(t *testing.T) {
 	c.Release(h)
 	require.Equal(t, 1, evicted)
 	require.Nil(t, c.Lookup([]byte("a")))
+}
+
+func TestLookupOrLoadBasic(t *testing.T) {
+	c := NewLRUCache[int](2)
+
+	loadCount := 0
+	h, err := c.LookupOrLoad([]byte("a"), func() (int, int, error) {
+		loadCount++
+		return 42, 1, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 42, h.Value())
+	require.Equal(t, 1, loadCount)
+	c.Release(h)
+
+	// Second call should hit cache, not call load.
+	h, err = c.LookupOrLoad([]byte("a"), func() (int, int, error) {
+		loadCount++
+		return 99, 1, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 42, h.Value())
+	require.Equal(t, 1, loadCount)
+	c.Release(h)
+}
+
+func TestLookupOrLoadError(t *testing.T) {
+	c := NewLRUCache[int](2)
+
+	loadErr := errors.New("load failed")
+	h, err := c.LookupOrLoad([]byte("a"), func() (int, int, error) {
+		return 0, 0, loadErr
+	})
+	require.ErrorIs(t, err, loadErr)
+	require.Nil(t, h)
+
+	// After a failed load, a subsequent call should retry.
+	h, err = c.LookupOrLoad([]byte("a"), func() (int, int, error) {
+		return 1, 1, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, h.Value())
+	c.Release(h)
+}
+
+func TestLookupOrLoadDedup(t *testing.T) {
+	c := NewLRUCache[int](2)
+
+	var loadCount atomic.Int32
+	ready := make(chan struct{})   // signals load func is executing
+	proceed := make(chan struct{}) // lets load func finish
+
+	var wg sync.WaitGroup
+
+	// First goroutine: becomes the loader, blocks until we signal.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		h, err := c.LookupOrLoad([]byte("a"), func() (int, int, error) {
+			loadCount.Add(1)
+			close(ready)
+			<-proceed
+			return 42, 1, nil
+		})
+		require.NoError(t, err)
+		require.Equal(t, 42, h.Value())
+		c.Release(h)
+	}()
+
+	<-ready // wait until load func is running
+
+	// Launch several waiters while load is in-flight.
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			h, err := c.LookupOrLoad([]byte("a"), func() (int, int, error) {
+				loadCount.Add(1)
+				return 99, 1, nil
+			})
+			require.NoError(t, err)
+			require.Equal(t, 42, h.Value())
+			c.Release(h)
+		}()
+	}
+
+	close(proceed) // let the loader finish
+	wg.Wait()
+
+	require.Equal(t, int32(1), loadCount.Load())
+}
+
+func TestLookupOrLoadIndependentKeys(t *testing.T) {
+	c := NewLRUCache[int](4)
+
+	var loadCount atomic.Int32
+	var wg sync.WaitGroup
+
+	// Different keys should load in parallel, no dedup.
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		key := []byte{byte('a' + i)}
+		val := i + 1
+		go func() {
+			defer wg.Done()
+			h, err := c.LookupOrLoad(key, func() (int, int, error) {
+				loadCount.Add(1)
+				return val, 1, nil
+			})
+			require.NoError(t, err)
+			require.Equal(t, val, h.Value())
+			c.Release(h)
+		}()
+	}
+
+	wg.Wait()
+	require.Equal(t, int32(4), loadCount.Load())
 }

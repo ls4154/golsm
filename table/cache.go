@@ -38,6 +38,20 @@ func (c *BlockCache) Insert(key BlockCacheKey, block *Block) func() {
 	}
 }
 
+func (c *BlockCache) LookupOrLoad(key BlockCacheKey, load func() (*Block, error)) (*Block, func(), error) {
+	h, err := c.lru.LookupOrLoad(key[:], func() (*Block, int, error) {
+		block, err := load()
+		if err != nil {
+			return nil, 0, err
+		}
+		return block, block.Size(), nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return h.Value(), func() { c.lru.Release(h) }, nil
+}
+
 func (c *BlockCache) TotalCharge() int {
 	return c.lru.TotalCharge()
 }
