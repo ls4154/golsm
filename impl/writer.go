@@ -47,13 +47,12 @@ func (db *dbImpl) newWriteSerializer() *writeSerializer {
 	}
 }
 
-func (ws *writeSerializer) Write(updates db.WriteBatch, opt *db.WriteOptions) error {
+func (ws *writeSerializer) Write(updates *WriteBatchImpl, opt *db.WriteOptions) error {
 	if updates == nil {
 		return nil
 	}
-	batch := updates.(*WriteBatchImpl)
 	w := &writer{
-		batch:  batch,
+		batch:  updates,
 		doneCh: make(chan struct{}),
 	}
 	if opt != nil && opt.Sync {

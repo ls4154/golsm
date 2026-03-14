@@ -252,6 +252,7 @@ func (d *dbImpl) RecoverLogFile(logNum FileNumber, last bool, edit *VersionEdit,
 		}
 
 		batch := WriteBatchFromContents(record)
+		util.Assert(batch.count() > 0)
 
 		if mem == nil {
 			mem = NewMemTable(d.icmp)
@@ -461,7 +462,11 @@ func (d *dbImpl) Write(updates db.WriteBatch, opt *db.WriteOptions) error {
 	if updates == nil {
 		return nil
 	}
-	return d.writeSerializer.Write(updates, opt)
+	batch := updates.(*WriteBatchImpl)
+	if batch.count() == 0 {
+		return nil
+	}
+	return d.writeSerializer.Write(batch, opt)
 }
 
 func (d *dbImpl) NewIterator(options *db.ReadOptions) (db.Iterator, error) {

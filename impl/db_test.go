@@ -2,6 +2,7 @@ package impl
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -163,6 +164,29 @@ func TestBatch(t *testing.T) {
 	}
 
 	ldb.Close()
+}
+
+func TestEmptyWriteBatchIsNoOp(t *testing.T) {
+	testDir := t.TempDir()
+	ldb, err := Open(db.DefaultOptions(), testDir)
+	require.NoError(t, err)
+	defer ldb.Close()
+
+	dbi := ldb.(*dbImpl)
+	logPath := LogFileName(testDir, dbi.logfileNum)
+
+	infoBefore, err := os.Stat(logPath)
+	require.NoError(t, err)
+	seqBefore := dbi.versions.GetLastSequence()
+
+	require.NoError(t, ldb.Write(NewWriteBatch(), &db.WriteOptions{Sync: true}))
+
+	infoAfter, err := os.Stat(logPath)
+	require.NoError(t, err)
+	seqAfter := dbi.versions.GetLastSequence()
+
+	require.Equal(t, infoBefore.Size(), infoAfter.Size())
+	require.Equal(t, seqBefore, seqAfter)
 }
 
 func TestDBOverwrite(t *testing.T) {
