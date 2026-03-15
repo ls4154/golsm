@@ -41,8 +41,8 @@ type DB interface {
 }
 
 type WriteBatch interface {
-	Put(key, value []byte)
-	Delete(key []byte)
+	Put(key, value []byte) error
+	Delete(key []byte) error
 }
 
 type Iterator interface {

@@ -469,9 +469,9 @@ func TestSnapshotWithBatch(t *testing.T) {
 	snap := ldb.GetSnapshot()
 
 	batch := NewWriteBatch()
-	batch.Put(key1, []byte("value1-updated"))
-	batch.Delete(key2)
-	batch.Put(key3, []byte("value3"))
+	require.NoError(t, batch.Put(key1, []byte("value1-updated")))
+	require.NoError(t, batch.Delete(key2))
+	require.NoError(t, batch.Put(key3, []byte("value3")))
 	require.NoError(t, ldb.Write(batch, nil))
 
 	// latest view

@@ -444,13 +444,17 @@ func (d *dbImpl) Get(key []byte, options *db.ReadOptions) ([]byte, error) {
 
 func (d *dbImpl) Put(key []byte, value []byte, opt *db.WriteOptions) error {
 	batch := NewWriteBatch()
-	batch.Put(key, value)
+	if err := batch.Put(key, value); err != nil {
+		return err
+	}
 	return d.Write(batch, opt)
 }
 
 func (d *dbImpl) Delete(key []byte, opt *db.WriteOptions) error {
 	batch := NewWriteBatch()
-	batch.Delete(key)
+	if err := batch.Delete(key); err != nil {
+		return err
+	}
 	return d.Write(batch, opt)
 }
 

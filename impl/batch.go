@@ -21,6 +21,12 @@ import (
 
 const writeBatchHeaderSize = 8 + 4
 
+const (
+	maxEncodedLength = 1<<32 - 1
+	maxUserKeyLength = maxEncodedLength - 8
+	maxValueLength   = maxEncodedLength
+)
+
 type WriteBatchImpl struct {
 	rep []byte
 }
@@ -73,17 +79,35 @@ func (b *WriteBatchImpl) Append(src *WriteBatchImpl) {
 	b.rep = append(b.rep, src.rep[writeBatchHeaderSize:]...)
 }
 
-func (b *WriteBatchImpl) Put(key, value []byte) {
+func (b *WriteBatchImpl) Put(key, value []byte) error {
+	if err := validateWriteLength("key", uint64(len(key)), maxUserKeyLength); err != nil {
+		return err
+	}
+	if err := validateWriteLength("value", uint64(len(value)), maxValueLength); err != nil {
+		return err
+	}
 	b.setCount(b.count() + 1)
 	b.rep = append(b.rep, byte(TypeValue))
 	b.rep = util.AppendLengthPrefixedBytes(b.rep, key)
 	b.rep = util.AppendLengthPrefixedBytes(b.rep, value)
+	return nil
 }
 
-func (b *WriteBatchImpl) Delete(key []byte) {
+func (b *WriteBatchImpl) Delete(key []byte) error {
+	if err := validateWriteLength("key", uint64(len(key)), maxUserKeyLength); err != nil {
+		return err
+	}
 	b.setCount(b.count() + 1)
 	b.rep = append(b.rep, byte(TypeDeletion))
 	b.rep = util.AppendLengthPrefixedBytes(b.rep, key)
+	return nil
+}
+
+func validateWriteLength(field string, length, maxLen uint64) error {
+	if length > maxLen {
+		return fmt.Errorf("%w: %s is too large", db.ErrInvalidArgument, field)
+	}
+	return nil
 }
 
 func (b *WriteBatchImpl) InsertIntoMemTable(mt *MemTable) error {
