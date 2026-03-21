@@ -25,7 +25,7 @@ func TestValidateOptionCompactionNilUsesSanitizedWriteBufferSize(t *testing.T) {
 
 	opt, err := validateOption(userOpt)
 	require.NoError(t, err)
-	require.Equal(t, uint64(512<<20), opt.Compaction.LevelBytesBase)
+	require.Equal(t, uint64(userOpt.WriteBufferSize*4), opt.Compaction.LevelBytesBase)
 }
 
 func TestValidateOptionCompactionUsesDefaultsForOmittedFields(t *testing.T) {

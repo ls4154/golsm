@@ -185,8 +185,7 @@ func DefaultCompactionOptions(writeBufferSize int) *CompactionOptions {
 		LevelBytesMultiplier: 10,
 	}
 
-	// roughly one full L0+L1 compaction's output
-	opt.LevelBytesBase = 2 * uint64(opt.L0CompactionTrigger) * uint64(writeBufferSize)
+	opt.LevelBytesBase = uint64(opt.L0CompactionTrigger) * uint64(writeBufferSize)
 	return opt
 }
 

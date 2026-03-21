@@ -1,11 +1,14 @@
 package impl
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/ls4154/golsm/db"
+	"github.com/ls4154/golsm/table"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,6 +52,85 @@ func hasAnyFileNumber(nums []FileNumber, want []FileNumber) bool {
 		}
 	}
 	return false
+}
+
+type compactionTableEntry struct {
+	userKey string
+	seq     SequenceNumber
+	typ     ValueType
+	value   []byte
+}
+
+func makeCompactionTestInternalKey(user string, seq SequenceNumber, typ ValueType) []byte {
+	out := make([]byte, 0, len(user)+8)
+	out = append(out, user...)
+	return binary.LittleEndian.AppendUint64(out, PackSequenceAndType(seq, typ))
+}
+
+func buildCompactionInputTable(t *testing.T, d *dbImpl, level Level, entries []compactionTableEntry) *FileMetaData {
+	t.Helper()
+
+	d.mu.Lock()
+	fileNum := d.versions.NewFileNumber()
+	d.mu.Unlock()
+
+	f, err := d.env.NewWritableFile(TableFileName(d.dbname, fileNum))
+	require.NoError(t, err)
+
+	builder := table.NewTableBuilder(f, d.icmp, d.options.BlockSize, d.options.Compression, d.options.BlockRestartInterval, d.ifilter)
+
+	var smallest []byte
+	var largest []byte
+	for i, entry := range entries {
+		key := makeCompactionTestInternalKey(entry.userKey, entry.seq, entry.typ)
+		if i == 0 {
+			smallest = append(smallest[:0], key...)
+		}
+		largest = append(largest[:0], key...)
+		builder.Add(key, entry.value)
+	}
+
+	require.NoError(t, builder.Finish())
+	size := builder.FileSize()
+	require.NoError(t, f.Sync())
+	require.NoError(t, f.Close())
+
+	return &FileMetaData{
+		number:   fileNum,
+		size:     size,
+		smallest: smallest,
+		largest:  largest,
+		level:    level,
+	}
+}
+
+func installCompactionTestFiles(t *testing.T, d *dbImpl, files ...*FileMetaData) {
+	t.Helper()
+
+	var edit VersionEdit
+	for _, f := range files {
+		edit.AddFile(f.level, f.number, f.size, f.smallest, f.largest)
+	}
+
+	d.mu.Lock()
+	err := d.versions.LogAndApply(&edit, &d.mu)
+	d.mu.Unlock()
+	require.NoError(t, err)
+}
+
+func countTableEntries(t *testing.T, d *dbImpl, meta *FileMetaData) int {
+	t.Helper()
+
+	it, err := d.tableCache.NewIterator(meta.number, meta.size, false, true)
+	require.NoError(t, err)
+	defer it.Close()
+
+	count := 0
+	for it.SeekToFirst(); it.Valid(); it.Next() {
+		count++
+	}
+	require.NoError(t, it.Error())
+	return count
 }
 
 func TestBackgroundCompactionCoversOverlappingL0(t *testing.T) {
@@ -177,4 +259,198 @@ func TestBackgroundCompactionDoesNotSetBackgroundErrorAcrossMultipleCompactions(
 		require.Len(t, got, len(value))
 		require.Equal(t, byte('a'+byte((rounds-1)%26)), got[0])
 	}
+}
+
+func TestBackgroundCompactionPreservesDeletedValueForSnapshot(t *testing.T) {
+	testDir := t.TempDir()
+	opt := db.DefaultOptions()
+	opt.WriteBufferSize = 64 << 10
+	opt.MaxFileSize = 1 << 20
+	opt.Compaction = &db.CompactionOptions{
+		L0CompactionTrigger: 1,
+		L0SlowdownTrigger:   2,
+		L0StopWritesTrigger: 3,
+	}
+
+	ldb, err := Open(opt, testDir)
+	require.NoError(t, err)
+	defer ldb.Close()
+
+	dbi := ldb.(*dbImpl)
+	key := []byte("victim")
+	value := []byte("value-before-delete")
+
+	require.NoError(t, ldb.Put(key, value, nil))
+	forceFlushAndWait(t, dbi)
+
+	require.Eventually(t, func() bool {
+		dbi.mu.Lock()
+		defer dbi.mu.Unlock()
+		return dbi.versions.NumLevelFiles(0) == 0 &&
+			dbi.versions.NumLevelFiles(1) > 0 &&
+			dbi.GetBackgroundError() == nil
+	}, 5*time.Second, 20*time.Millisecond)
+
+	snap := ldb.GetSnapshot()
+	defer snap.Release()
+
+	require.NoError(t, ldb.Delete(key, nil))
+	forceFlushAndWait(t, dbi)
+
+	require.Eventually(t, func() bool {
+		dbi.mu.Lock()
+		defer dbi.mu.Unlock()
+		return dbi.versions.NumLevelFiles(0) == 0 &&
+			dbi.GetBackgroundError() == nil
+	}, 5*time.Second, 20*time.Millisecond)
+
+	_, err = ldb.Get(key, nil)
+	require.ErrorIs(t, err, db.ErrNotFound)
+
+	got, err := ldb.Get(key, &db.ReadOptions{Snapshot: snap})
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+}
+
+func TestBackgroundCompactionPerformsTrivialMoveToLevel2(t *testing.T) {
+	testDir := t.TempDir()
+	opt := db.DefaultOptions()
+	opt.WriteBufferSize = 64 << 10
+	opt.MaxFileSize = 4 << 20
+	opt.Compression = db.NoCompression
+	opt.Compaction = &db.CompactionOptions{
+		L0CompactionTrigger: 1,
+		L0SlowdownTrigger:   4,
+		L0StopWritesTrigger: 8,
+		LevelBytesBase:      1 << 20,
+	}
+
+	ldb, err := Open(opt, testDir)
+	require.NoError(t, err)
+	defer ldb.Close()
+
+	dbi := ldb.(*dbImpl)
+	value := bytes.Repeat([]byte("x"), 512)
+
+	const keyCount = 3000
+	for i := 0; i < keyCount; i++ {
+		key := []byte(fmt.Sprintf("k%05d", i))
+		require.NoError(t, ldb.Put(key, value, nil))
+	}
+	forceFlushAndWait(t, dbi)
+	dbi.scheduleCompaction()
+
+	require.Eventually(t, func() bool {
+		dbi.mu.Lock()
+		defer dbi.mu.Unlock()
+		return dbi.versions.NumLevelFiles(2) > 0 &&
+			dbi.versions.NumLevelFiles(0) == 0 &&
+			dbi.GetBackgroundError() == nil
+	}, 15*time.Second, 20*time.Millisecond)
+
+	require.NoError(t, backgroundError(dbi))
+	require.NotEmpty(t, levelFileNumbers(dbi, 2))
+
+	checkKeys := []string{"k00000", "k01000", fmt.Sprintf("k%05d", keyCount-1)}
+	for _, key := range checkKeys {
+		got, getErr := ldb.Get([]byte(key), nil)
+		require.NoError(t, getErr)
+		require.Equal(t, value, got)
+	}
+}
+
+func TestDoCompactionWorkKeepsTombstoneWhenHigherLevelHasData(t *testing.T) {
+	testDir := t.TempDir()
+	opt := db.DefaultOptions()
+	opt.MaxFileSize = 1 << 20
+	opt.Compression = db.NoCompression
+
+	ldb, err := Open(opt, testDir)
+	require.NoError(t, err)
+	defer ldb.Close()
+
+	dbi := ldb.(*dbImpl)
+
+	l0Delete := buildCompactionInputTable(t, dbi, 0, []compactionTableEntry{{
+		userKey: "victim",
+		seq:     7,
+		typ:     TypeDeletion,
+	}})
+	l2Value := buildCompactionInputTable(t, dbi, 2, []compactionTableEntry{{
+		userKey: "victim",
+		seq:     5,
+		typ:     TypeValue,
+		value:   []byte("stale-value"),
+	}})
+	installCompactionTestFiles(t, dbi, l0Delete, l2Value)
+
+	dbi.mu.Lock()
+	dbi.versions.SetLastSequence(100)
+	cur := dbi.versions.current
+	cur.Ref()
+	err = dbi.doCompactionWork(&Compaction{
+		level:        0,
+		inputVersion: cur,
+		inputs: [2][]*FileMetaData{
+			{l0Delete},
+			nil,
+		},
+		maxGrandparentOverlapBytes: dbi.versions.compaction.maxGrandparentOverlapBytes(),
+	})
+	dbi.mu.Unlock()
+	cur.Unref()
+	require.NoError(t, err)
+
+	require.Len(t, dbi.versions.current.files[1], 1)
+
+	var lookup LookupKey
+	lookup.Set([]byte("victim"), dbi.versions.GetLastSequence())
+	_, err = dbi.versions.current.Get(&lookup, false, true)
+	require.ErrorIs(t, err, db.ErrNotFound)
+}
+
+func TestDoCompactionWorkDropsOlderVersionsWithoutSnapshots(t *testing.T) {
+	testDir := t.TempDir()
+	opt := db.DefaultOptions()
+	opt.MaxFileSize = 1 << 20
+	opt.Compression = db.NoCompression
+
+	ldb, err := Open(opt, testDir)
+	require.NoError(t, err)
+	defer ldb.Close()
+
+	dbi := ldb.(*dbImpl)
+
+	l1Input := buildCompactionInputTable(t, dbi, 1, []compactionTableEntry{
+		{userKey: "alpha", seq: 9, typ: TypeValue, value: []byte("v-alpha")},
+		{userKey: "victim", seq: 7, typ: TypeValue, value: []byte("new")},
+		{userKey: "victim", seq: 5, typ: TypeValue, value: []byte("old")},
+	})
+	installCompactionTestFiles(t, dbi, l1Input)
+
+	dbi.mu.Lock()
+	dbi.versions.SetLastSequence(100)
+	cur := dbi.versions.current
+	cur.Ref()
+	err = dbi.doCompactionWork(&Compaction{
+		level:        1,
+		inputVersion: cur,
+		inputs: [2][]*FileMetaData{
+			{l1Input},
+			nil,
+		},
+	})
+	dbi.mu.Unlock()
+	cur.Unref()
+	require.NoError(t, err)
+
+	require.Empty(t, dbi.versions.current.files[1])
+	require.Len(t, dbi.versions.current.files[2], 1)
+	require.Equal(t, 2, countTableEntries(t, dbi, dbi.versions.current.files[2][0]))
+
+	var lookup LookupKey
+	lookup.Set([]byte("victim"), dbi.versions.GetLastSequence())
+	value, err := dbi.versions.current.Get(&lookup, false, true)
+	require.NoError(t, err)
+	require.Equal(t, []byte("new"), value)
 }

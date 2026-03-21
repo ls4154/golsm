@@ -476,3 +476,26 @@ func TestFinalizePicksHighestScoreLevel(t *testing.T) {
 	require.Equal(t, Level(1), v.compactionLevel)
 	require.InDelta(t, 1.5, v.compactionScore, 0.01)
 }
+
+func TestVersionBuilderMaybeAddFileSkipsDeletedFile(t *testing.T) {
+	vs := testVersionSetForCompaction()
+	builder := vs.NewBuilder(vs.current)
+	v := vs.NewVersion()
+	f := testFile(1, 7, 1, "a", "b")
+
+	builder.deletedFiles[1][f.number] = struct{}{}
+	builder.MaybeAddFile(v, 1, f)
+
+	require.Empty(t, v.files[1])
+}
+
+func TestVersionBuilderMaybeAddFileAppendsNonDeletedFile(t *testing.T) {
+	vs := testVersionSetForCompaction()
+	builder := vs.NewBuilder(vs.current)
+	v := vs.NewVersion()
+	f := testFile(1, 8, 1, "c", "d")
+
+	builder.MaybeAddFile(v, 1, f)
+
+	require.Equal(t, []*FileMetaData{f}, v.files[1])
+}

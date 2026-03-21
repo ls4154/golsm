@@ -99,7 +99,7 @@ func freeLargeBuffer[T ~[]byte](buf *T) {
 }
 
 func TestManualMaxSizedKeyRoundTrip(t *testing.T) {
-	t.Skip("manual large-memory test; remove Skip to run on a machine with ample RAM")
+	t.Skip() // manual large-memory test
 
 	testDir := t.TempDir()
 	ldb, err := Open(db.DefaultOptions(), testDir)
@@ -120,7 +120,7 @@ func TestManualMaxSizedKeyRoundTrip(t *testing.T) {
 }
 
 func TestManualOversizedKeyIsRejected(t *testing.T) {
-	t.Skip("manual large-memory test; remove Skip to run on a machine with ample RAM")
+	t.Skip() // manual large-memory test
 
 	testDir := t.TempDir()
 	ldb, err := Open(db.DefaultOptions(), testDir)
@@ -137,7 +137,7 @@ func TestManualOversizedKeyIsRejected(t *testing.T) {
 }
 
 func TestManualMaxSizedValueRoundTrip(t *testing.T) {
-	t.Skip("manual large-memory test; remove Skip to run on a machine with ample RAM")
+	t.Skip() // manual large-memory test
 
 	testDir := t.TempDir()
 	ldb, err := Open(db.DefaultOptions(), testDir)
@@ -158,7 +158,7 @@ func TestManualMaxSizedValueRoundTrip(t *testing.T) {
 }
 
 func TestManualOversizedValueIsRejected(t *testing.T) {
-	t.Skip("manual large-memory test; remove Skip to run on a machine with ample RAM")
+	t.Skip() // manual large-memory test
 
 	testDir := t.TempDir()
 	ldb, err := Open(db.DefaultOptions(), testDir)

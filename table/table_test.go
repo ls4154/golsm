@@ -2,6 +2,7 @@ package table
 
 import (
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/ls4154/golsm/db"
@@ -14,7 +15,7 @@ func TestTable(t *testing.T) {
 	env := fs.Default()
 	for _, numEntries := range []int{1, 10, 100, 1000, 10000, 100000} {
 		t.Run(fmt.Sprintf("numEntries=%d", numEntries), func(t *testing.T) {
-			fname := fmt.Sprintf("%06d.ldb", numEntries)
+			fname := filepath.Join(t.TempDir(), fmt.Sprintf("%06d.ldb", numEntries))
 			writeTable(t, env, fname, numEntries, db.NoCompression)
 			readTable(t, env, fname, numEntries)
 		})
@@ -25,7 +26,7 @@ func TestTableSnappy(t *testing.T) {
 	env := fs.Default()
 	for _, numEntries := range []int{1, 10, 100, 1000, 10000, 100000} {
 		t.Run(fmt.Sprintf("numEntries=%d", numEntries), func(t *testing.T) {
-			fname := fmt.Sprintf("%06d.ldb", numEntries)
+			fname := filepath.Join(t.TempDir(), fmt.Sprintf("%06d.ldb", numEntries))
 			writeTable(t, env, fname, numEntries, db.SnappyCompression)
 			readTable(t, env, fname, numEntries)
 		})
