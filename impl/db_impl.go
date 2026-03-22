@@ -447,7 +447,7 @@ func (d *dbImpl) Put(key []byte, value []byte, opt *db.WriteOptions) error {
 	if err := batch.Put(key, value); err != nil {
 		return err
 	}
-	return d.Write(batch, opt)
+	return d.write(batch, opt)
 }
 
 func (d *dbImpl) Delete(key []byte, opt *db.WriteOptions) error {
@@ -455,7 +455,7 @@ func (d *dbImpl) Delete(key []byte, opt *db.WriteOptions) error {
 	if err := batch.Delete(key); err != nil {
 		return err
 	}
-	return d.Write(batch, opt)
+	return d.write(batch, opt)
 }
 
 func (d *dbImpl) NewWriteBatch() db.WriteBatch {
@@ -466,7 +466,10 @@ func (d *dbImpl) Write(updates db.WriteBatch, opt *db.WriteOptions) error {
 	if updates == nil {
 		return nil
 	}
-	batch := updates.(*WriteBatchImpl)
+	return d.write(updates.(*WriteBatchImpl), opt)
+}
+
+func (d *dbImpl) write(batch *WriteBatchImpl, opt *db.WriteOptions) error {
 	if batch.count() == 0 {
 		return nil
 	}

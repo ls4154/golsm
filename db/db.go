@@ -41,7 +41,23 @@ type DB interface {
 }
 
 type WriteBatch interface {
+	// Put adds a value update to the batch.
 	Put(key, value []byte) error
+	// Delete adds a deletion to the batch.
+	Delete(key []byte) error
+	// Clear removes all entries from the batch.
+	Clear()
+	// Append copies src entries to the end of the batch.
+	Append(src WriteBatch) error
+	// Iterate calls handler for each entry in insertion order.
+	// The handler must not mutate key/value. Returning an error stops iteration.
+	Iterate(handler WriteBatchHandler) error
+}
+
+type WriteBatchHandler interface {
+	// Put handles a value entry during Iterate.
+	Put(key, value []byte) error
+	// Delete handles a deletion entry during Iterate.
 	Delete(key []byte) error
 }
 

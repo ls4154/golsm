@@ -89,11 +89,10 @@ func (ws *writeSerializer) main() {
 			return
 		}
 		batch := ws.buildBatchGroup(writers)
-
 		err := ws.apply(batch, writers[0].sync)
 
 		if batch == ws.tempBatch {
-			ws.tempBatch.clear()
+			ws.tempBatch.Clear()
 		}
 
 		for _, w := range writers {
@@ -162,7 +161,8 @@ func (ws *writeSerializer) buildBatchGroup(writers []*writer) *WriteBatchImpl {
 
 	b := ws.tempBatch
 	for _, w := range writers {
-		b.Append(w.batch)
+		err := b.appendContents(w.batch)
+		util.Assert(err == nil)
 	}
 
 	return b
@@ -178,11 +178,11 @@ func (d *dbImpl) applyBatch(batch *WriteBatchImpl, sync bool) error {
 	}
 
 	lastSeq := d.versions.GetLastSequence()
-	batch.setSequence(lastSeq + 1)
 
 	// writeSerializer guarantees only one applyBatch runs at a time,
 	// so releasing the mutex here is safe.
 	d.mu.Unlock()
+	batch.setSequence(lastSeq + 1)
 	err = d.log.AddRecord(batch.contents())
 	if err == nil && sync {
 		err = d.logfile.Sync()
