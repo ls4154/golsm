@@ -13,7 +13,6 @@ type logRecordType byte
 const (
 	// Physical types persisted in WAL.
 
-	logRecordZero   logRecordType = 0
 	logRecordFull   logRecordType = 1
 	logRecordFirst  logRecordType = 2
 	logRecordMiddle logRecordType = 3

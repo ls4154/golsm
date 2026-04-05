@@ -123,6 +123,52 @@ func TestLogCRCChecksumMismatch(t *testing.T) {
 	require.ErrorIs(t, err, db.ErrCorruption)
 }
 
+func TestLogReadRecordContinuesAfterChecksumMismatch(t *testing.T) {
+	var buf flushBuffer
+	writer := NewWriter(&buf)
+	require.NoError(t, writer.AddRecord([]byte("ok-1")))
+	require.NoError(t, writer.AddRecord(bytes.Repeat([]byte("b"), logBlockSize-2*logHeaderSize-4)))
+	require.NoError(t, writer.AddRecord([]byte("ok-2")))
+
+	raw := buf.Bytes()
+	raw[(logHeaderSize+4)+logHeaderSize] ^= 0x01
+
+	reader := NewReader(bytes.NewReader(raw))
+
+	record, err := reader.ReadRecord()
+	require.NoError(t, err)
+	require.Equal(t, []byte("ok-1"), record)
+
+	_, err = reader.ReadRecord()
+	require.ErrorIs(t, err, db.ErrCorruption)
+
+	record, err = reader.ReadRecord()
+	require.NoError(t, err)
+	require.Equal(t, []byte("ok-2"), record)
+
+	_, err = reader.ReadRecord()
+	require.ErrorIs(t, err, io.EOF)
+}
+
+func TestLogReadRecordContinuesAfterPartialFragmentWithoutEnd(t *testing.T) {
+	var buf flushBuffer
+	writer := NewWriter(&buf)
+	require.NoError(t, writer.emitPhysicalRecord(logRecordFirst, []byte("partial")))
+	require.NoError(t, writer.emitPhysicalRecord(logRecordFull, []byte("tail")))
+
+	reader := NewReader(bytes.NewReader(buf.Bytes()))
+
+	_, err := reader.ReadRecord()
+	require.ErrorIs(t, err, db.ErrCorruption)
+
+	record, err := reader.ReadRecord()
+	require.NoError(t, err)
+	require.Equal(t, []byte("tail"), record)
+
+	_, err = reader.ReadRecord()
+	require.ErrorIs(t, err, io.EOF)
+}
+
 func TestWriterSizeTracksBytes(t *testing.T) {
 	var buf flushBuffer
 	writer := NewWriter(&buf)

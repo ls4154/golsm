@@ -246,3 +246,36 @@ func TestWriteBatchSameKeyRepeatedOpsEndingWithPutPersistsAcrossRecovery(t *test
 	require.NoError(t, err)
 	require.Equal(t, []byte("v3"), value)
 }
+
+func makeMalformedBatch(t *testing.T, seq SequenceNumber) *WriteBatchImpl {
+	t.Helper()
+
+	batch := NewWriteBatch()
+	require.NoError(t, batch.Put([]byte("a"), []byte("va")))
+	require.NoError(t, batch.Put([]byte("b"), []byte("vb")))
+	batch.setSequence(seq)
+
+	raw := append([]byte(nil), batch.contents()...)
+	return WriteBatchFromContents(raw[:len(raw)-1])
+}
+
+func TestWriteBatchInsertIntoMemTableAppliesPrefixBeforeCorruption(t *testing.T) {
+	batch := makeMalformedBatch(t, 7)
+	mt := NewMemTable(&InternalKeyComparator{userCmp: util.BytewiseComparator})
+
+	err := batch.InsertIntoMemTable(mt)
+	require.ErrorIs(t, err, db.ErrCorruption)
+
+	var lookup LookupKey
+	lookup.Set([]byte("a"), MaxSequenceNumber)
+	value, deleted, found := mt.Get(&lookup)
+	require.True(t, found)
+	require.False(t, deleted)
+	require.Equal(t, []byte("va"), value)
+
+	lookup.Set([]byte("b"), MaxSequenceNumber)
+	value, deleted, found = mt.Get(&lookup)
+	require.False(t, found)
+	require.False(t, deleted)
+	require.Nil(t, value)
+}

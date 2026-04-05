@@ -235,35 +235,56 @@ func (d *dbImpl) RecoverLogFile(logNum FileNumber, last bool, edit *VersionEdit,
 	var mem *MemTable
 	var recoverErr error
 	var recordBuf []byte
-	// TODO ignore corruption option
 	for {
 		recordBuf, err = reader.ReadRecordInto(recordBuf)
 		if errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
+			if d.ignoreLogRecoveryCorruption(logNum, err) {
+				continue
+			}
 			recoverErr = err
 			break
 		}
 		record := recordBuf
 
-		if len(record) < 12 {
-			recoverErr = fmt.Errorf("%w: log record too small", db.ErrCorruption)
-			break
-		}
-
-		batch := WriteBatchFromContents(record)
-		util.Assert(batch.count() > 0)
-
-		if mem == nil {
-			mem = NewMemTable(d.icmp)
-		}
-		err = batch.InsertIntoMemTable(mem)
-		if err != nil {
+		if len(record) < writeBatchHeaderSize {
+			err = fmt.Errorf("%w: log record too small", db.ErrCorruption)
+			if d.ignoreLogRecoveryCorruption(logNum, err) {
+				continue
+			}
 			recoverErr = err
 			break
 		}
 
+		batch := WriteBatchFromContents(record)
+		if batch.count() == 0 {
+			err = fmt.Errorf("%w: empty WriteBatch in log record", db.ErrCorruption)
+			if d.ignoreLogRecoveryCorruption(logNum, err) {
+				continue
+			}
+			recoverErr = err
+			break
+		}
 		lastSeq := batch.sequence() + SequenceNumber(batch.count()) - 1
+
+		if mem == nil {
+			mem = NewMemTable(d.icmp)
+		}
+		// Match LevelDB recovery semantics: a malformed WriteBatch may leave a
+		// valid prefix applied to mem before reporting corruption.
+		err = batch.InsertIntoMemTable(mem)
+		if err != nil {
+			if d.ignoreLogRecoveryCorruption(logNum, err) {
+				if lastSeq > *maxSeq {
+					*maxSeq = lastSeq
+				}
+				continue
+			}
+			recoverErr = err
+			break
+		}
+
 		if lastSeq > *maxSeq {
 			*maxSeq = lastSeq
 		}
@@ -293,6 +314,14 @@ func (d *dbImpl) RecoverLogFile(logNum FileNumber, last bool, edit *VersionEdit,
 	}
 
 	return nil
+}
+
+func (d *dbImpl) ignoreLogRecoveryCorruption(logNum FileNumber, err error) bool {
+	if d.options.ParanoidChecks || !errors.Is(err, db.ErrCorruption) {
+		return false
+	}
+	d.logger.Printf("ignoring corrupted log #%d record: %v", logNum, err)
+	return true
 }
 
 func (d *dbImpl) initManifest() error {

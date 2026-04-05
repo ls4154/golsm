@@ -11,12 +11,18 @@ import (
 )
 
 type Reader struct {
-	src          io.Reader
-	backingStore [logBlockSize]byte // fixed read buffer
-	buf          []byte             // unprocessed slice into backingStore
-	offset       int
-	eof          bool
-	verifyCRC    bool
+	src                  io.Reader
+	backingStore         [logBlockSize]byte // fixed read buffer
+	buf                  []byte             // unprocessed slice into backingStore
+	offset               int
+	eof                  bool
+	verifyCRC            bool
+	skipUntilRecordStart bool
+
+	hasPendingPhysical bool
+	pendingPhysical    []byte
+	pendingType        logRecordType
+	corruptionErr      error
 }
 
 func NewReader(src io.Reader) *Reader {
@@ -39,6 +45,8 @@ func (r *Reader) ReadRecord() ([]byte, error) {
 // ReadRecordInto decodes one logical WAL record into dst and returns it.
 //
 // dst's previous contents are discarded, returned slice may alias dst.
+// If it returns db.ErrCorruption, the reader has already advanced past the
+// corrupt data and may be called again to continue recovery.
 func (r *Reader) ReadRecordInto(dst []byte) ([]byte, error) {
 	record := dst[:0]
 	if record == nil {
@@ -52,44 +60,72 @@ func (r *Reader) ReadRecordInto(dst []byte) ([]byte, error) {
 			return nil, err
 		}
 
-		// TODO: If initial-offset reads are needed, implement resync here.
-		// Skip a run of MIDDLE/LAST fragments until a new logical-record boundary is found.
+		if r.skipUntilRecordStart {
+			switch recordType {
+			case logRecordMiddle:
+				continue
+			case logRecordLast:
+				r.skipUntilRecordStart = false
+				continue
+			default:
+				r.skipUntilRecordStart = false
+			}
+		}
 
 		switch recordType {
 		case logRecordFull:
 			if inFragmentedRecord {
-				return nil, fmt.Errorf("%w: partial record without end", db.ErrCorruption)
+				r.setPendingPhysical(fragment, logRecordFull)
+				return nil, corruptionf("partial record without end")
 			}
 			record = append(record[:0], fragment...)
 			return record, nil
 		case logRecordFirst:
 			if inFragmentedRecord {
-				return nil, fmt.Errorf("%w: partial record without end", db.ErrCorruption)
+				r.setPendingPhysical(fragment, logRecordFirst)
+				return nil, corruptionf("partial record without end")
 			}
 			inFragmentedRecord = true
 			record = append(record[:0], fragment...)
 		case logRecordMiddle:
 			if !inFragmentedRecord {
-				return nil, fmt.Errorf("%w: missing start of fragmented record", db.ErrCorruption)
+				r.skipUntilRecordStart = true
+				return nil, corruptionf("missing start of fragmented record")
 			}
 			record = append(record, fragment...)
 		case logRecordLast:
 			if !inFragmentedRecord {
-				return nil, fmt.Errorf("%w: missing start of fragmented record", db.ErrCorruption)
+				r.skipUntilRecordStart = true
+				return nil, corruptionf("missing start of fragmented record")
 			}
 			record = append(record, fragment...)
 			return record, nil
 		case logRecordEof:
 			return nil, io.EOF
 		case logRecordBad:
-			return nil, fmt.Errorf("%w: error in middle of record", db.ErrCorruption)
+			if inFragmentedRecord {
+				r.skipUntilRecordStart = true
+			}
+			return nil, r.takeCorruptionError()
 		default:
-			return nil, fmt.Errorf("%w: unknown record type %d", db.ErrCorruption, recordType)
+			if inFragmentedRecord {
+				r.skipUntilRecordStart = true
+			}
+			return nil, corruptionf("unknown record type %d", recordType)
 		}
 	}
 }
 
 func (r *Reader) readPhysicalRecord() ([]byte, logRecordType, error) {
+	if r.hasPendingPhysical {
+		fragment := r.pendingPhysical
+		recordType := r.pendingType
+		r.hasPendingPhysical = false
+		r.pendingPhysical = nil
+		r.pendingType = 0
+		return fragment, recordType, nil
+	}
+
 	for {
 		if len(r.buf) < logHeaderSize {
 			if !r.eof {
@@ -112,6 +148,8 @@ func (r *Reader) readPhysicalRecord() ([]byte, logRecordType, error) {
 		length := int(r.buf[4]) | (int(r.buf[5]) << 8)
 		if logHeaderSize+length > len(r.buf) {
 			if !r.eof {
+				r.buf = nil
+				r.corruptionErr = corruptionf("bad record length")
 				return nil, logRecordBad, nil
 			} else {
 				// ignore truncated record at eof
@@ -121,14 +159,12 @@ func (r *Reader) readPhysicalRecord() ([]byte, logRecordType, error) {
 
 		t := logRecordType(r.buf[6])
 
-		if t == logRecordZero && length == 0 {
-			return nil, logRecordBad, nil
-		}
-
 		if r.verifyCRC {
 			expectedCRC := util.UnmaskCRC32(binary.LittleEndian.Uint32(r.buf[0:]))
 			actualCRC := util.ChecksumCRC32C(r.buf[6 : 6+1+length])
 			if expectedCRC != actualCRC {
+				r.buf = nil
+				r.corruptionErr = corruptionf("checksum mismatch")
 				return nil, logRecordBad, nil
 			}
 		}
@@ -138,4 +174,23 @@ func (r *Reader) readPhysicalRecord() ([]byte, logRecordType, error) {
 
 		return result, t, nil
 	}
+}
+
+func (r *Reader) setPendingPhysical(fragment []byte, recordType logRecordType) {
+	r.pendingPhysical = append(r.pendingPhysical[:0], fragment...)
+	r.pendingType = recordType
+	r.hasPendingPhysical = true
+}
+
+func (r *Reader) takeCorruptionError() error {
+	if r.corruptionErr == nil {
+		return corruptionf("bad log record")
+	}
+	err := r.corruptionErr
+	r.corruptionErr = nil
+	return err
+}
+
+func corruptionf(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", db.ErrCorruption, fmt.Sprintf(format, args...))
 }
